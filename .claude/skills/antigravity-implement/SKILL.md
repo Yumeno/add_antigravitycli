@@ -1,6 +1,6 @@
 ---
 name: antigravity-implement
-description: Antigravity CLIを実装担当として起動し、cleanなGitリポジトリを最小権限で編集させ、変更を独立検収する。ユーザーがこのスキルまたはAntigravityへの実装委任を明示した場合に限って使う。
+description: Antigravity CLIを実装担当として起動し、必要に応じて複数の画像・音声・動画・PDFを参照させ、cleanなGitリポジトリを最小権限で編集させて変更を独立検収する。ユーザーがこのスキルまたはAntigravityへの実装委任を明示した場合に限って使う。
 disable-model-invocation: true
 allowed-tools: Bash Read Grep Glob
 ---
@@ -20,9 +20,13 @@ allowed-tools: Bash Read Grep Glob
 powershell -ExecutionPolicy Bypass -NoProfile -File "<解決したscripts>/antigravity-implement.ps1" -SpecFile "C:/absolute/spec.txt" -Repo "C:/absolute/repo"
 ```
 
+複数mediaは絶対pathを1行1件で並べたUTF-8ファイルを作り、`-AttachmentList`で渡す。
+
 ```bash
 bash "<解決したscripts>/antigravity-implement.sh" --spec-file "/absolute/spec.txt" --repo "/absolute/repo"
 ```
+
+bashでは`--attachment`を必要な数だけ順序どおり反復する。
 
 7. 成功申告を信用せず、`git status --short`、`git diff --stat`、`git diff` と受け入れテストを自分で確認する。
 8. 依頼外変更や秘密情報を検査し、変更ファイル、テスト結果、残課題を報告する。問題があっても無断で変更を破棄しない。

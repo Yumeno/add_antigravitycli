@@ -1,6 +1,6 @@
 ---
 name: antigravity-implement
-description: Antigravity CLIを実装担当として明示的に起動し、cleanなGitリポジトリ内を最小権限で編集させ、変更を独立検収する。ユーザーが「antigravity-implement」「Antigravityに実装させて」など実装委任を明示した場合に限って使う。質問、レビュー、曖昧な作業依頼から自動起動しない。
+description: Antigravity CLIを実装担当として明示的に起動し、必要に応じて複数の画像・音声・動画・PDFを参照させ、cleanなGitリポジトリ内を最小権限で編集させて変更を独立検収する。ユーザーが「antigravity-implement」「Antigravityに実装させて」など実装委任を明示した場合に限って使う。
 ---
 
 # Antigravity CLIへ実装を委任する
@@ -23,9 +23,13 @@ description: Antigravity CLIを実装担当として明示的に起動し、clea
 powershell -ExecutionPolicy Bypass -NoProfile -File "<解決したscripts>\antigravity-implement.ps1" -SpecFile "C:\absolute\spec.txt" -Repo "C:\absolute\repo"
 ```
 
+複数mediaは絶対pathを1行1件で並べたUTF-8ファイルを作り、`-AttachmentList`で渡す。
+
 ```bash
 bash "<解決したscripts>/antigravity-implement.sh" --spec-file "/absolute/spec.txt" --repo "/absolute/repo"
 ```
+
+bashでは`--attachment`を必要な数だけ順序どおり反復する。
 
 wrapperはAntigravity CLIのboolean `--sandbox` を常に有効化する。sandboxへmode値を渡そうとしない。権限拡大や対話承認の自動化を行わない。
 

@@ -1,6 +1,8 @@
 ﻿param(
     [Parameter(Mandatory=$true)][string]$SpecFile,
     [Parameter(Mandatory=$true)][string]$Repo,
+    [string]$Attachment = "",
+    [string]$AttachmentList = "",
     [string]$Model = "",
     [int]$Timeout = 600
 )
@@ -40,6 +42,8 @@ $spec
 "@
 try {
     $args = @("-Prompt",$prompt,"-WorkDir",$root,"-Timeout",[string]$Timeout)
+    if ($Attachment) { $args += @("-Attachment", $Attachment) }
+    if ($AttachmentList) { $args += @("-AttachmentList", $AttachmentList) }
     if ($Model) { $args += @("-Model",$Model) }
     $output = & powershell -NoProfile -ExecutionPolicy Bypass -File $wrapper @args 2>&1
     $code = $LASTEXITCODE

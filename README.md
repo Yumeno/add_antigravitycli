@@ -7,8 +7,8 @@ Claude CodeまたはCodexからAntigravity CLIへ質問、レビュー、実装�
 | スキル | 用途 |
 |---|---|
 | `ask-antigravity` | コンテキストなしの質問、セカンドオピニオン |
-| `ask-antigravity-with-context` | ファイル、diff、履歴を添えたレビューや監査 |
-| `antigravity-implement` | cleanなGitリポジトリでの明示的な実装委任と独立検収 |
+| `ask-antigravity-with-context` | テキスト、複数media、diff、履歴を添えたレビューや監査 |
+| `antigravity-implement` | 複数mediaも参照できる、cleanなGitリポジトリでの実装委任と独立検収 |
 | `list-antigravity-models` | モデル指定方法と現在のwrapper設定の確認 |
 | `set-antigravity-model` | wrapperの既定モデルの保存、確認 |
 
@@ -71,9 +71,40 @@ Claude Codeでは `/ask-antigravity ...` のように呼び出します。
 - プロンプトはコマンドラインへ直接展開せず、wrapperが安全な入力経路でCLIへ渡します。
 - wrapperは値を取らないboolean `agy --sandbox` を常に有効化します。`read-only` や `workspace-write` のようなmode値は渡しません。
 - コンテキストは依頼に必要な範囲だけを外部サービスへ送信します。
+- mediaは元ファイルを直接workspaceへ公開せず、wrapper所有の一時workspaceへcopyします。順序、元ファイル名、MIME、byte数をmanifest化します。
+- ディレクトリ、symlink / reparse point、認識できない形式を拒否します。未検証形式を暗黙変換しません。
 - helperの失敗sentinelとLLM回答を区別します。
 - 実装委任前にclean treeとsnapshotを確認し、実行後はGit diffとテストを呼び出し元が独立検収します。
 - commit、push、PR作成、既存変更の破棄、権限拡大は自動実行しません。
+
+## 複数media
+
+画像に限定せず、認識可能な画像・音声・動画・PDFを順序付きで渡せます。PNG、JPEG、WAV、MP3、MP4は実CLI probe済みです。それ以外はunit testでstagingを確認した段階では`experimental`と表示し、形式別E2Eが完了するまで対応保証済みとは扱いません。
+
+| 状態 | MIME |
+|---|---|
+| `probe-verified` | `image/png`, `image/jpeg`, `audio/wav`, `audio/mpeg`, `video/mp4` |
+| `experimental` | GIF, WebP, BMP, TIFF, SVG, PDF, FLAC, OGG, MOV, WebM, AVI |
+
+これは「任意バイナリ対応」ではありません。magic bytesまたはOSのmedia判定で認識でき、allowlistに含まれる通常ファイルだけを受け付けます。
+
+Windowsでは絶対pathを1行1件で記載したUTF-8リストを使います。
+
+```powershell
+powershell -ExecutionPolicy Bypass -NoProfile -File scripts\antigravity-wrapper.ps1 `
+    -Prompt "順番に比較して" -AttachmentList "C:\path\attachments.txt"
+```
+
+bashでは同じ`--attachment`を反復します。
+
+```bash
+bash scripts/antigravity-wrapper.sh --prompt "順番に比較して" \
+  --attachment "/path/first.png" \
+  --attachment "/path/second.wav" \
+  --attachment "/path/third.mp4"
+```
+
+正常ワークロードの実測前に一律size capを設けていません。総byte数を実行前に表示し、利用者が送信量を判断できるようにします。
 
 ## テスト
 

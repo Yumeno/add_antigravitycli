@@ -31,6 +31,32 @@ try {
         foreach($v in @("--print","--print-timeout","180s","--sandbox","--new-project","--add-dir","--model","test-model")){if($argv-notcontains$v){throw "argv missing $v"}}
         if((Get-Content $env:FAKE_CWD -Raw)-ne$Work){throw "cwd mismatch"}
     }
+    Case "ordered mixed media staging" {
+        $env:FAKE_MODE="success"
+        $png=Join-Path $Root "first image.png"; $wav=Join-Path $Root "second-audio.wav"
+        $list=Join-Path $Root "attachments.txt"
+        [IO.File]::WriteAllBytes($png,[byte[]](0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A))
+        [IO.File]::WriteAllBytes($wav,[Text.Encoding]::ASCII.GetBytes("RIFF0000WAVE"))
+        [IO.File]::WriteAllLines($list,@($png,$wav),(New-Object Text.UTF8Encoding($false)))
+        $r=Run @("-Prompt","inspect","-WorkDir",$Work,"-AttachmentList",$list)
+        if($r.Code-ne 0-or$r.Text-notmatch'fake response'){throw $r.Text}
+        $stdin=Get-Content $env:FAKE_STDIN -Raw -Encoding UTF8
+        if($stdin-notmatch'1\..*original=first image\.png.*mime=image/png.*support=probe-verified'){throw "first media missing: $stdin"}
+        if($stdin-notmatch'2\..*original=second-audio\.wav.*mime=audio/wav.*support=probe-verified'){throw "second media missing: $stdin"}
+        $argv=Get-Content $env:FAKE_ARGS -Encoding UTF8
+        if((@($argv|Where-Object{$_-eq"--add-dir"}).Count)-ne 2){throw "media staging workspace missing"}
+    }
+    Case "invalid media cleanup" {
+        $mediaTemp=Join-Path $Root "media-temp"; New-Item -ItemType Directory -Path $mediaTemp|Out-Null
+        $bad=Join-Path $Root "not-media.bin"; [IO.File]::WriteAllText($bad,"not media")
+        $previousTemp=$env:TEMP
+        try {
+            $env:TEMP=$mediaTemp
+            $r=Run @("-Prompt","inspect","-Attachment",$bad)
+        } finally { $env:TEMP=$previousTemp }
+        if($r.Code-eq 0-or$r.Text-notmatch'Unsupported or unrecognized media format'){throw $r.Text}
+        if(Get-ChildItem -LiteralPath $mediaTemp -Force){throw "temporary media directory leaked"}
+    }
     Case "exit code preserved" { $env:FAKE_MODE="fail";$r=Run @("-Prompt","x");if($r.Code-ne 7-or$r.Text-notmatch'fake failure'){throw $r.Text} }
     Case "empty rejected" { $env:FAKE_MODE="empty";$r=Run @("-Prompt","x");if($r.Code-eq 0-or$r.Text-notmatch'empty output'){throw $r.Text} }
     Case "timeout" { $env:FAKE_MODE="sleep";$r=Run @("-Prompt","x","-Timeout","1");if($r.Code-ne 2-or$r.Text-notmatch'timed out'){throw $r.Text} }
