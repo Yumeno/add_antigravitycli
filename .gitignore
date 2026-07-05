@@ -1,0 +1,14 @@
+# Local reference repositories
+.reference-*/
+
+# Runtime configuration and temporary context
+scripts/*.conf
+*.tmp
+*.log
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
