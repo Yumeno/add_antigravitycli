@@ -22,7 +22,7 @@ Claude CodeまたはCodexからAntigravity CLIへ質問、レビュー、実装�
 
 ## 構成と互換性
 
-- `.agents/skills/`: Codex向けの正本。Agent Skills標準に合わせ、frontmatterは `name` と `description` のみ。
+- `.agents/skills/`: Codex CLI と Antigravity CLI(`agy`) が読む正本。Agent Skills標準に合わせ、frontmatterは `name` と `description` のみ。
 - `.claude/skills/`: Claude Code向け配布コピー。手動起動を保証するため `disable-model-invocation: true` と最小限の `allowed-tools` を追加。
 - `scripts/`: CLI呼び出し、実装、検収を担うクロスプラットフォームhelper。
 
@@ -52,7 +52,27 @@ New-Item -ItemType Directory -Force "$env:USERPROFILE\scripts" | Out-Null
 Copy-Item scripts\antigravity-* "$env:USERPROFILE\scripts\" -Force
 ```
 
-各Skillは自身の配置場所から `../../../scripts` を解決します。ユーザー全体への導入では `$USERPROFILE/scripts`、プロジェクト配置ではリポジトリ直下の `scripts/` を参照します。
+### Antigravity CLI (`agy`)
+
+Antigravity CLI 自身のグローバルスキルとして導入します。CLI 版もフォルダ + `SKILL.md` 方式(`.agents` と同じ構造)を受け付けます。ソースは `.agents/skills/` を流用します。
+
+```powershell
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.gemini\antigravity-cli\skills" | Out-Null
+Get-ChildItem .agents\skills -Directory | Copy-Item -Destination "$env:USERPROFILE\.gemini\antigravity-cli\skills" -Recurse -Force
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.gemini\scripts" | Out-Null
+Copy-Item scripts\antigravity-* "$env:USERPROFILE\.gemini\scripts\" -Force
+```
+
+Antigravity CLI 側では `SKILL.md` の frontmatter のうち `disable-model-invocation` や `allowed-tools` の解釈が公式ドキュメントに明記されていません(参考: [Antigravity CLI Skills](https://antigravity.google/docs/cli/plugins))。動作は代表 1 ケースで確認してから運用してください。
+
+Antigravity CLI が公式にサポートする Plugin 形式(`plugin.json` + `plugins/<name>/skills/`)でラップして `agy plugin install <path>` する経路もあります。単独スキル配布で足りない場合はこちらを検討してください。
+
+### パス解決について
+
+各Skillは自身の配置場所から `../../../scripts` を解決します。プロジェクト配置ではリポジトリ直下の `scripts/` を参照します。ユーザー全体への導入では:
+
+- Codex / Claude Code: `$USERPROFILE\scripts\`
+- Antigravity CLI: `$USERPROFILE\.gemini\scripts\`
 
 ## 使用例
 
