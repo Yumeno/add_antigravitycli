@@ -22,10 +22,20 @@ t_dirty_refused() {
     [[ $code -eq 1 && "$output" == *'must be clean'* ]]
 }
 t_edit_reported() { new_repo; snapshot; printf x >>"$ROOT/file.txt"; run_check; [[ $code -eq 0 && "$output" == *'file.txt'* ]]; }
-t_head() { new_repo; snapshot; printf x >>"$ROOT/file.txt"; git -C "$ROOT" commit -qam next; run_check; [[ $code -eq 2 && "$output" == *'HEAD changed'* ]]; }
-t_branch() { new_repo; snapshot; git -C "$ROOT" checkout -qb other; run_check; [[ $code -eq 2 && "$output" == *'branch changed'* ]]; }
-t_env() { new_repo; printf a >"$ROOT/.env"; git -C "$ROOT" add -f .env; git -C "$ROOT" commit -qm env; snapshot; printf b >"$ROOT/.env"; run_check; [[ $code -eq 2 && "$output" == *'protected file modified: .env'* ]]; }
-t_config() { new_repo; snapshot; git -C "$ROOT" config x.y z; run_check; [[ $code -eq 2 && "$output" == *'.git/config'* ]]; }
+t_head() { new_repo; snapshot; printf x >>"$ROOT/file.txt"; git -C "$ROOT" commit -qam next; run_check; [[ $code -eq 3 && "$output" == *'HEAD changed'* ]]; }
+t_branch() { new_repo; snapshot; git -C "$ROOT" checkout -qb other; run_check; [[ $code -eq 3 && "$output" == *'branch changed'* ]]; }
+t_env() { new_repo; printf a >"$ROOT/.env"; git -C "$ROOT" add -f .env; git -C "$ROOT" commit -qm env; snapshot; printf b >"$ROOT/.env"; run_check; [[ $code -eq 3 && "$output" == *'protected file modified: .env'* ]]; }
+t_nested_env() { new_repo; snapshot; mkdir "$ROOT/sub"; printf a >"$ROOT/sub/.env"; run_check; [[ $code -eq 3 && "$output" == *'sub/.env'* ]]; }
+t_config() { new_repo; snapshot; git -C "$ROOT" config x.y z; run_check; [[ $code -eq 3 && "$output" == *'.git/config'* ]]; }
+t_ref() { new_repo; snapshot; mkdir -p "$ROOT/.git/refs/tags"; git -C "$ROOT" rev-parse HEAD >"$ROOT/.git/refs/tags/foo"; run_check; [[ $code -eq 3 && "$output" == *'.git/refs/tags/foo'* ]]; }
+t_gitmodules() { new_repo; snapshot; printf '[submodule "x"]\n' >"$ROOT/.gitmodules"; run_check; [[ $code -eq 3 && "$output" == *'.gitmodules'* ]]; }
+t_symlink_target() {
+    new_repo; printf one >"$ROOT/secret"; ln -s secret "$ROOT/.env" 2>/dev/null || return 0
+    [[ -L "$ROOT/.env" ]] || return 0
+    git -C "$ROOT" add -f .env secret; git -C "$ROOT" commit -qm symlink; snapshot
+    printf two >"$ROOT/secret"; run_check
+    [[ $code -eq 3 && "$output" == *'.env'* ]]
+}
 t_inside() {
     new_repo; set +e; output="$(bash "$VERIFY" snapshot --repo "$ROOT" --out "$ROOT/snap" 2>&1)"; code=$?; set -e
     [[ $code -eq 1 && "$output" == *'outside the repository'* ]]
@@ -36,7 +46,11 @@ testcase ordinary_edit_reported t_edit_reported
 testcase head_violation t_head
 testcase branch_violation t_branch
 testcase env_violation t_env
+testcase nested_env_violation t_nested_env
 testcase git_config_violation t_config
+testcase git_ref_violation t_ref
+testcase gitmodules_violation t_gitmodules
+testcase symlink_target_violation t_symlink_target
 testcase snapshot_outside_repo t_inside
 printf 'Passed: %d / %d\n' "$passed" "$total"
 [[ "$passed" -eq "$total" ]]

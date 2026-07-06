@@ -20,13 +20,13 @@ description: テキスト、複数の画像・音声・動画・PDF、git diff�
 4. この `SKILL.md` のディレクトリから `../../../scripts` を絶対パスへ解決し、wrapperを単独コマンドで実行する。現在の作業ディレクトリを前提にしない。
 
 ```powershell
-powershell -ExecutionPolicy Bypass -NoProfile -File "<解決したscripts>\antigravity-wrapper.ps1" -Prompt "レビューしてください" -ContextFile "C:\absolute\path\context.txt"
+powershell -ExecutionPolicy Bypass -NoProfile -File "<解決したscripts>/antigravity-wrapper.ps1" -Prompt "レビューしてください" -ContextFile "C:/absolute/path/context.txt"
 ```
 
 複数mediaの場合は、絶対pathを1行1件で並べたUTF-8ファイルを作り、`-AttachmentList`で渡す。単一mediaだけなら`-Attachment`も使える。
 
 ```powershell
-powershell -ExecutionPolicy Bypass -NoProfile -File "<解決したscripts>\antigravity-wrapper.ps1" -Prompt "順番に比較してください" -AttachmentList "C:\absolute\path\attachments.txt"
+powershell -ExecutionPolicy Bypass -NoProfile -File "<解決したscripts>/antigravity-wrapper.ps1" -Prompt "順番に比較してください" -AttachmentList "C:/absolute/path/attachments.txt"
 ```
 
 ```bash

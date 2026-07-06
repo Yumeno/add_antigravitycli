@@ -7,7 +7,7 @@ allowed-tools: Bash Read Write Grep Glob
 
 # コンテキスト付きでAntigravityに質問する
 
-1. ファイル指定、`git diff`、`git diff --staged`、`git log --oneline -20` から依頼に必要なものだけを収集する。
+1. ファイル指定、`git diff`、`git diff --staged`、`git log --oneline -20`、security/監査時は変更ファイル一覧も、依頼に必要なものだけを収集する。
 2. 秘密情報や無関係な内容を除外する。外部送信の可否が不明なら停止して確認する。
 3. UTF-8の一時ファイルに質問、対象説明、原文をまとめる。黙ってsize capを適用しない。
    - mediaはユーザー指定順を保持し、画像・音声・動画・PDF・異種混在を同列に扱う。

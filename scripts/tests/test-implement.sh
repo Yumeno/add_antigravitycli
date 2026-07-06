@@ -30,7 +30,7 @@ case_protected() {
     new_repo; export FAKE_AGY_WRITE_FILE="$ROOT/.env"
     set +e; output="$(PATH="$SHIM:$PATH" bash "$IMPLEMENT" --spec-file "$SPEC" --repo "$ROOT" 2>&1)"; code=$?; set -e
     unset FAKE_AGY_WRITE_FILE
-    [[ $code -eq 2 && "$output" == *'[ANTIGRAVITY_VERIFY_VIOLATION]'* ]]
+    [[ $code -eq 3 && "$output" == *'[ANTIGRAVITY_VERIFY_VIOLATION]'* ]]
 }
 testcase() {
     local name="$1"; shift; total=$((total+1))

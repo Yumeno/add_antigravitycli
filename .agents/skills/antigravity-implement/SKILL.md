@@ -13,14 +13,14 @@ description: Antigravity CLIを実装担当として明示的に起動し、必�
 2. `git status --short` でclean treeを確認する。既存変更があれば停止し、勝手にstash、破棄、上書きしない。
 3. 現在の `HEAD`、ブランチ、statusを記録する。
 4. タスク、変更可能範囲、変更禁止範囲、受け入れ条件、実行すべきテストをUTF-8の一時仕様ファイルへ具体的に記述する。
-5. コミット、push、PR作成、外部送信、依存追加、破壊的操作を許可しない。dangerous flagや承認回避フラグは既定で禁止する。必要なら個別にユーザー承認を得る。
+5. コミット、push、PR作成、Antigravity CLI 経由の委任以外の外部送信、依存追加、破壊的操作を許可しない。dangerous flagや承認回避フラグは既定で禁止する。必要なら個別にユーザー承認を得る。
 
 ## 実行
 
 この `SKILL.md` のディレクトリから `../../../scripts` を絶対パスへ解決し、implement helperを単独コマンドで呼ぶ。現在の作業ディレクトリを前提にしない。
 
 ```powershell
-powershell -ExecutionPolicy Bypass -NoProfile -File "<解決したscripts>\antigravity-implement.ps1" -SpecFile "C:\absolute\spec.txt" -Repo "C:\absolute\repo"
+powershell -ExecutionPolicy Bypass -NoProfile -File "<解決したscripts>/antigravity-implement.ps1" -SpecFile "C:/absolute/spec.txt" -Repo "C:/absolute/repo"
 ```
 
 複数mediaは絶対pathを1行1件で並べたUTF-8ファイルを作り、`-AttachmentList`で渡す。

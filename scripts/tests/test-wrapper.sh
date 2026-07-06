@@ -19,7 +19,7 @@ t_stdin() {
     export FAKE_AGY_OUTPUT=ok
     payload=$'日本語 "quote"\nsecond line'
     PATH="$ROOT/bin:$PATH" bash "$WRAPPER" --prompt "$payload" --workdir "$ROOT/work" >/dev/null 2>/dev/null &&
-        [[ "$(cat "$ROOT/stdin")" == "$payload" ]] && ! grep -qF '日本語' "$ROOT/argv"
+        [[ "$(cat "$ROOT/stdin")" == $'## Request\n\n'"$payload" ]] && ! grep -qF '日本語' "$ROOT/argv"
 }
 t_args() {
     export FAKE_AGY_OUTPUT=ok
@@ -36,7 +36,7 @@ t_media() {
     printf 'RIFF\044\000\000\000WAVEfmt ' >"$wav"
     PATH="$ROOT/bin:$PATH" bash "$WRAPPER" --prompt inspect --workdir "$ROOT/work" \
         --attachment "$png" --attachment "$wav" >/dev/null 2>/dev/null &&
-        grep -Fq 'original=first\ image.png, mime=image/png' "$ROOT/stdin" &&
+        grep -Fq 'original=first image.png, mime=image/png' "$ROOT/stdin" &&
         grep -Eq '2\..*original=second-audio\.wav.*mime=audio/(x-)?wav.*support=probe-verified' "$ROOT/stdin" &&
         [[ "$(grep -c -x -- '--add-dir' "$ROOT/argv")" -eq 2 ]]
 }

@@ -29,7 +29,7 @@ bash "<解決したscripts>/antigravity-implement.sh" --spec-file "/absolute/spe
 bashでは`--attachment`を必要な数だけ順序どおり反復する。
 
 7. 成功申告を信用せず、`git status --short`、`git diff --stat`、`git diff` と受け入れテストを自分で確認する。
-8. 依頼外変更や秘密情報を検査し、変更ファイル、テスト結果、残課題を報告する。問題があっても無断で変更を破棄しない。
+8. 依頼外変更、秘密情報、生成物、依存追加、危険なコマンド、テスト弱体化を検査し、変更ファイル、テスト結果、残課題を報告する。問題があっても無断で変更を破棄しない。
 9. 自分が作成した一時仕様ファイルだけを削除する。
 
 wrapperはAntigravity CLIのboolean `--sandbox` を常に有効化する。sandboxへmode値を渡そうとしない。

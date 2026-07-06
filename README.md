@@ -37,8 +37,8 @@ Claude CodeまたはCodexからAntigravity CLIへ質問、レビュー、実装�
 ```powershell
 New-Item -ItemType Directory -Force "$env:USERPROFILE\.agents\skills" | Out-Null
 Get-ChildItem .agents\skills -Directory | Copy-Item -Destination "$env:USERPROFILE\.agents\skills" -Recurse -Force
-New-Item -ItemType Directory -Force "$env:USERPROFILE\.agents\scripts" | Out-Null
-Copy-Item scripts\antigravity-* "$env:USERPROFILE\.agents\scripts\" -Force
+New-Item -ItemType Directory -Force "$env:USERPROFILE\scripts" | Out-Null
+Copy-Item scripts\antigravity-* "$env:USERPROFILE\scripts\" -Force
 ```
 
 ### Claude Code
@@ -48,11 +48,11 @@ Copy-Item scripts\antigravity-* "$env:USERPROFILE\.agents\scripts\" -Force
 ```powershell
 New-Item -ItemType Directory -Force "$env:USERPROFILE\.claude\skills" | Out-Null
 Get-ChildItem .claude\skills -Directory | Copy-Item -Destination "$env:USERPROFILE\.claude\skills" -Recurse -Force
-New-Item -ItemType Directory -Force "$env:USERPROFILE\.claude\scripts" | Out-Null
-Copy-Item scripts\antigravity-* "$env:USERPROFILE\.claude\scripts\" -Force
+New-Item -ItemType Directory -Force "$env:USERPROFILE\scripts" | Out-Null
+Copy-Item scripts\antigravity-* "$env:USERPROFILE\scripts\" -Force
 ```
 
-各Skillは自身の配置場所から `../../../scripts` を解決します。そのため、ユーザー全体への導入ではSkillと同じツールディレクトリ配下の `scripts/` も必須です。プロジェクト配置ではリポジトリ直下の `scripts/` を参照します。
+各Skillは自身の配置場所から `../../../scripts` を解決します。ユーザー全体への導入では `$USERPROFILE/scripts`、プロジェクト配置ではリポジトリ直下の `scripts/` を参照します。
 
 ## 使用例
 
@@ -75,6 +75,8 @@ Claude Codeでは `/ask-antigravity ...` のように呼び出します。
 - ディレクトリ、symlink / reparse point、認識できない形式を拒否します。未検証形式を暗黙変換しません。
 - helperの失敗sentinelとLLM回答を区別します。
 - 実装委任前にclean treeとsnapshotを確認し、実行後はGit diffとテストを呼び出し元が独立検収します。
+- 実装委任時の共通制約は `scripts/antigravity-implement-safety.txt` で管理します。
+- Windows の `.cmd` / `.bat` dispatch では、`WorkDir` などの引数にcmd.exe特殊文字を含めないでください。該当する入力はfail-closedで拒否します。
 - commit、push、PR作成、既存変更の破棄、権限拡大は自動実行しません。
 
 ## 複数media

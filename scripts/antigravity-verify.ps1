@@ -5,7 +5,7 @@
     [string[]]$Allow = @()
 )
 $ErrorActionPreference = "Stop"
-function Fail([string]$Message) { Write-Output "[ANTIGRAVITY_VERIFY_ERROR] $Message"; exit 2 }
+function Fail([string]$Message, [int]$Code = 1) { Write-Output "[ANTIGRAVITY_VERIFY_ERROR] $Message"; exit $Code }
 function Invoke-Git([string[]]$Arguments, [switch]$MayFail) {
     $stderrFile = [IO.Path]::GetTempFileName()
     $previousErrorAction = $ErrorActionPreference
@@ -32,7 +32,9 @@ function Relative([string]$Path) {
 }
 function Protected([string]$Path) {
     $p = $Path.Replace("\","/"); $name = [IO.Path]::GetFileName($p)
-    return ($p -ieq ".git/config" -or $p -ilike ".git/hooks/*" -or $name -ieq ".env" -or
+    return ($p -ieq ".git/config" -or $p -ieq ".git/HEAD" -or $p -ieq ".git/packed-refs" -or
+        $p -ieq ".git/info/exclude" -or $p -ilike ".git/hooks/*" -or $p -ilike ".git/refs/*" -or
+        $p -ieq ".gitmodules" -or $name -ieq ".env" -or
         $name -ilike ".env.*" -or $name -imatch '\.(pem|key|p12|pfx)$')
 }
 function FileState([string]$Path) {
@@ -42,16 +44,30 @@ function FileState([string]$Path) {
 }
 function ProtectedState {
     $state = [ordered]@{}
-    foreach ($item in Get-ChildItem -LiteralPath $script:Root -Recurse -Force -File | Where-Object FullName -NotLike "$($script:Root)\.git\*") {
+    $rootItems = Get-ChildItem -LiteralPath $script:Root -Force
+    foreach ($item in @($rootItems | Where-Object { -not $_.PSIsContainer -and $_.Name -ne ".git" }) +
+        @($rootItems | Where-Object { $_.PSIsContainer -and $_.Name -ne ".git" } | ForEach-Object {
+            Get-ChildItem -LiteralPath $_.FullName -Recurse -Force -File
+        })) {
         $rel = Relative $item.FullName; if (Protected $rel) { $state[$rel] = FileState $item.FullName }
     }
-    $config = Invoke-Git @("rev-parse","--path-format=absolute","--git-path","config")
-    if (Test-Path -LiteralPath $config -PathType Leaf) { $state[".git/config"] = FileState $config }
-    $hooks = Invoke-Git @("rev-parse","--path-format=absolute","--git-path","hooks")
+    $gitDir = Invoke-Git @("rev-parse","--absolute-git-dir")
+    foreach ($entry in @(@("config",".git/config"),@("HEAD",".git/HEAD"),@("packed-refs",".git/packed-refs"),@("info/exclude",".git/info/exclude"))) {
+        $path = Join-Path $gitDir $entry[0]
+        if (Test-Path -LiteralPath $path -PathType Leaf) { $state[$entry[1]] = FileState $path }
+    }
+    $hooks = Join-Path $gitDir "hooks"
     if (Test-Path -LiteralPath $hooks -PathType Container) {
         foreach ($item in Get-ChildItem -LiteralPath $hooks -Recurse -Force -File) {
             $rel = $item.FullName.Substring($hooks.Length).TrimStart("\","/").Replace("\","/")
             $state[".git/hooks/$rel"] = FileState $item.FullName
+        }
+    }
+    $refs = Join-Path $gitDir "refs"
+    if (Test-Path -LiteralPath $refs -PathType Container) {
+        foreach ($item in Get-ChildItem -LiteralPath $refs -Recurse -Force -File) {
+            $rel = $item.FullName.Substring($refs.Length).TrimStart("\","/").Replace("\","/")
+            $state[".git/refs/$rel"] = FileState $item.FullName
         }
     }
     return $state
@@ -72,7 +88,9 @@ try {
     if ($Command -eq "snapshot") {
         if ($Allow.Count) { Fail "Allow is valid only with check" }
         if (-not (Test-Path -LiteralPath (Split-Path -Parent $snap) -PathType Container)) { Fail "Snapshot directory does not exist" }
-        [IO.File]::WriteAllText($snap, (State | ConvertTo-Json -Depth 8), (New-Object Text.UTF8Encoding($false)))
+        $current = State
+        if (-not [string]::IsNullOrWhiteSpace($current.status)) { Fail "Working tree must be clean before snapshot" }
+        [IO.File]::WriteAllText($snap, ($current | ConvertTo-Json -Depth 8), (New-Object Text.UTF8Encoding($false)))
         Write-Output "[ANTIGRAVITY_VERIFY_OK] snapshot created"; exit 0
     }
     if (-not (Test-Path -LiteralPath $snap -PathType Leaf)) { Fail "Snapshot not found" }
@@ -97,7 +115,7 @@ try {
         if ($allowed.Contains($p)) { Write-Output "[ANTIGRAVITY_VERIFY_ALLOWED] protected change: $p" }
         else { $violations.Add("protected change: $p") }
     }
-    if ($violations.Count) { $violations | ForEach-Object { Write-Output "[ANTIGRAVITY_VERIFY_VIOLATION] $_" }; exit 1 }
+    if ($violations.Count) { $violations | ForEach-Object { Write-Output "[ANTIGRAVITY_VERIFY_VIOLATION] $_" }; exit 3 }
     Write-Output "[ANTIGRAVITY_VERIFY_OK] no unapproved changes"; exit 0
-} catch { Fail $_.Exception.Message }
+} catch { Fail $_.Exception.Message 2 }
 

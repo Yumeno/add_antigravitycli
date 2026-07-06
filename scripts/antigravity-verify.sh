@@ -4,7 +4,12 @@ set -euo pipefail
 ERROR='[ANTIGRAVITY_VERIFY_ERROR]'
 VIOLATION='[ANTIGRAVITY_VERIFY_VIOLATION]'
 ALLOWED='[ANTIGRAVITY_VERIFY_ALLOWED]'
-die() { printf '%s %s\n' "$ERROR" "$*" >&2; exit 1; }
+die() {
+    local code=1
+    if [[ "${1:-}" =~ ^[0-9]+$ ]]; then code="$1"; shift; fi
+    printf '%s %s\n' "$ERROR" "$*" >&2
+    exit "$code"
+}
 b64e() { printf '%s' "$1" | base64 | tr -d '\r\n'; }
 b64d() {
     if printf '' | base64 --decode >/dev/null 2>&1; then
@@ -14,12 +19,19 @@ b64d() {
     fi
 }
 hash_path() {
-    if [[ -L "$1" ]]; then printf 'symlink:%s' "$(readlink "$1")"
+    if [[ -L "$1" ]]; then
+        local target digest='unresolvable'
+        target="$(readlink "$1")"
+        if [[ -f "$1" ]]; then
+            if command -v sha256sum >/dev/null 2>&1; then digest="$(sha256sum "$1" | awk '{print $1}')"
+            else digest="$(shasum -a 256 "$1" | awk '{print $1}')"; fi
+        fi
+        printf 'symlink:%s:%s' "$target" "$digest"
     elif command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'
     else shasum -a 256 "$1" | awk '{print $1}'; fi
 }
 
-CMD="${1:-}"; [[ -n "$CMD" ]] || die 'Expected snapshot or check.'; shift || true
+CMD="${1:-}"; [[ -n "$CMD" ]] || die 1 'Expected snapshot or check.'; shift || true
 REPO=''; OUT=''; SNAP=''; ALLOWS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -36,22 +48,28 @@ REQUESTED="$(cd "$REPO" && pwd -P)"
 REPO="$(git -C "$REQUESTED" rev-parse --show-toplevel 2>/dev/null)" || die "Not a git repository: $REQUESTED"
 REPO="$(cd "$REPO" && pwd -P)"
 git_repo() { git -C "$REPO" "$@"; }
-CONFIG="$(git_repo rev-parse --path-format=absolute --git-path config)"
-HOOKS="$(git_repo rev-parse --path-format=absolute --git-path hooks)"
+GIT_DIR="$(git_repo rev-parse --absolute-git-dir)" || die 2 'Unable to resolve Git directory.'
+CONFIG="$GIT_DIR/config"
+HOOKS="$GIT_DIR/hooks"
 
 rel() {
     if [[ "$1" == "$CONFIG" ]]; then printf '.git/config'
     elif [[ "$1" == "$HOOKS/"* ]]; then printf '.git/hooks/%s' "${1#"$HOOKS/"}"
+    elif [[ "$1" == "$GIT_DIR/refs/"* ]]; then printf '.git/refs/%s' "${1#"$GIT_DIR/refs/"}"
+    elif [[ "$1" == "$GIT_DIR/"* ]]; then printf '.git/%s' "${1#"$GIT_DIR/"}"
     else printf '%s' "${1#"$REPO/"}"; fi
 }
 enumerate() {
     local dest="$1"; : >"$dest"
-    find "$REPO" -maxdepth 1 -mindepth 1 \( -type f -o -type l \) \
-        \( -name '.env' -o -name '.env.*' \) ! -name '.env.\*' -print0 >>"$dest"
     find "$REPO" -path "$REPO/.git" -prune -o \( -type f -o -type l \) \
-        \( -name '*.pem' -o -name '*.key' -o -name '*.p12' -o -name '*.pfx' \) -print0 >>"$dest"
+        \( -name '.env' -o -name '.env.*' -o -name '*.pem' -o -name '*.key' -o -name '*.p12' -o -name '*.pfx' \) -print0 >>"$dest"
+    [[ ! -e "$REPO/.gitmodules" && ! -L "$REPO/.gitmodules" ]] || printf '%s\0' "$REPO/.gitmodules" >>"$dest"
     [[ ! -e "$CONFIG" && ! -L "$CONFIG" ]] || printf '%s\0' "$CONFIG" >>"$dest"
     [[ ! -d "$HOOKS" ]] || find "$HOOKS" -maxdepth 1 \( -type f -o -type l \) ! -name '*.sample' -print0 >>"$dest"
+    for p in "$GIT_DIR/HEAD" "$GIT_DIR/packed-refs" "$GIT_DIR/info/exclude"; do
+        [[ ! -e "$p" && ! -L "$p" ]] || printf '%s\0' "$p" >>"$dest"
+    done
+    [[ ! -d "$GIT_DIR/refs" ]] || find "$GIT_DIR/refs" \( -type f -o -type l \) -print0 >>"$dest"
 }
 LIST="$(mktemp "${TMPDIR:-/tmp}/antigravity_verify.XXXXXX")" || die 'Unable to create temp file.'
 CURRENT_FILE="$(mktemp "${TMPDIR:-/tmp}/antigravity_current.XXXXXX")" || die 'Unable to create temp file.'
@@ -69,9 +87,9 @@ if [[ "$CMD" == snapshot ]]; then
     FULL="$(canonical_out "$OUT")"
     [[ "$FULL" != "$REPO" && "$FULL" != "$REPO/"* ]] || die 'snapshot file must be outside the repository'
     [[ ! -e "$FULL" && ! -L "$FULL" ]] || die "Snapshot file already exists: $FULL"
-    STATUS="$(git_repo status --porcelain=v1 -uall)" || die 'Unable to read Git status.'
+    STATUS="$(git_repo status --porcelain=v1 -uall)" || die 2 'Unable to read Git status.'
     [[ -z "$STATUS" ]] || die 'Working tree must be clean before snapshot.'
-    HEAD="$(git_repo rev-parse HEAD)" || die 'Unable to read HEAD.'
+    HEAD="$(git_repo rev-parse HEAD)" || die 2 'Unable to read HEAD.'
     BRANCH="$(git_repo symbolic-ref --quiet --short HEAD 2>/dev/null || printf '(detached)')"
     enumerate "$LIST"
     umask 077
@@ -129,4 +147,4 @@ git_repo status --short
 printf '%s\n' '--- changed files ---'
 git_repo diff --name-only
 git_repo diff --cached --name-only
-[[ "$violations" -eq 0 ]] || exit 2
+[[ "$violations" -eq 0 ]] || exit 3

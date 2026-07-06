@@ -29,10 +29,8 @@ cleanup() { rm -f "$SNAP" "$INSTRUCTION"; }
 trap cleanup EXIT HUP INT TERM
 "$VERIFY" snapshot --repo "$ROOT" --out "$SNAP" >/dev/null
 {
-    printf '%s\n' '次の依頼を、このGitリポジトリ内だけで実装してください。'
-    printf '%s\n' '対象リポジトリ外のファイルを読取・列挙・検索しないでください。CLI内部の認証・設定処理を除き、他projectやユーザー設定を調査しないでください。'
-    printf '%s\n' '禁止: .git、認証情報、.envへの接触、commit/branch/tag/ref/Git設定/hook/submodule操作、依頼範囲外の変更。'
-    printf '%s\n\n' '必要なテストを実行し、最後に変更ファイルとテスト結果を報告してください。'
+    cat -- "$SCRIPT_DIR/antigravity-implement-safety.txt"
+    printf '\n\n---\n\n'
     cat -- "$SPEC_FILE"
 } >"$INSTRUCTION"
 ARGS=(--prompt-file "$INSTRUCTION" --workdir "$ROOT" --timeout "$TIMEOUT" --sandbox)
