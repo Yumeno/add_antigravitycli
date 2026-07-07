@@ -5,7 +5,7 @@ description: antigravity-wrapperの既定モデルを保存または確認する
 
 # Antigravityの既定モデルを設定する
 
-モデル名はユーザー指定をそのまま使い、存在を推測しない。引数なしなら設定を表示する。この `SKILL.md` のディレクトリから `../../../scripts` を絶対パスへ解決し、現在の作業ディレクトリを前提にしない。
+モデル名はユーザー指定をそのまま使い、存在を推測しない。引数なしなら設定を表示する。この `SKILL.md` のディレクトリ直下の `scripts/` を絶対パスへ解決し、現在の作業ディレクトリや共通 `$HOME/scripts` を前提にしない。
 
 ```powershell
 powershell -ExecutionPolicy Bypass -NoProfile -File "<解決したscripts>\antigravity-wrapper.ps1" -ShowModel

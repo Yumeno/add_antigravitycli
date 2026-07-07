@@ -5,6 +5,7 @@ $Work = Join-Path $Root "work dir"
 New-Item -ItemType Directory -Path $Work -Force | Out-Null
 $oldPath=$env:PATH; $env:PATH="$PSScriptRoot;$oldPath"
 $env:FAKE_ARGS=Join-Path $Root args.txt; $env:FAKE_STDIN=Join-Path $Root stdin.txt; $env:FAKE_CWD=Join-Path $Root cwd.txt
+$env:ANTIGRAVITY_WRAPPER_CONFIG=Join-Path $Root "antigravity-wrapper.conf"
 $passed=0; $failed=0
 function Run([string[]]$Arguments) {
     $o=& powershell -NoProfile -ExecutionPolicy Bypass -File $Wrapper @Arguments 2>&1
@@ -98,6 +99,7 @@ try {
     }
 } finally {
     $env:PATH=$oldPath; Remove-Item Env:ANTIGRAVITY_WRAPPER_MODEL -ErrorAction SilentlyContinue
+    Remove-Item Env:ANTIGRAVITY_WRAPPER_CONFIG -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $Root -Recurse -Force -ErrorAction SilentlyContinue
 }
 Write-Host "Passed: $passed; Failed: $failed"; if($failed){exit 1}

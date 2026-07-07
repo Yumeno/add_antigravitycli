@@ -7,7 +7,7 @@ allowed-tools: Bash Read
 
 # Antigravityモデル設定を確認する
 
-この `SKILL.md` のディレクトリ（通常 `$CLAUDE_SKILL_DIR`）から `../../../scripts` を絶対パスへ解決する。現在の作業ディレクトリを前提にしない。
+この `SKILL.md` のディレクトリ（通常 `$CLAUDE_SKILL_DIR`）直下の `scripts/` を絶対パスへ解決する。現在の作業ディレクトリや共通 `$HOME/scripts` を前提にしない。
 
 ```bash
 agy models

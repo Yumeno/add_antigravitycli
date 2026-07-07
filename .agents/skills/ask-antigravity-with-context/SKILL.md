@@ -17,7 +17,7 @@ description: テキスト、複数の画像・音声・動画・PDF、git diff�
    - media指定: 指定された全ファイルをユーザーの順序どおり保持する。画像だけと仮定せず、音声・動画・PDF・異種混在を同列に扱う。
 2. 外部サービスへ送信すべきでない内容が見つかったら停止し、ユーザーへ対象除外または許可を求める。
 3. 質問、対象の説明、必要な原文をUTF-8の一時ファイルへまとめる。正常ワークロードを黙って切り詰めない。大きすぎる場合は警告し、分割方針を示す。
-4. この `SKILL.md` のディレクトリから `../../../scripts` を絶対パスへ解決し、wrapperを単独コマンドで実行する。現在の作業ディレクトリを前提にしない。
+4. この `SKILL.md` のディレクトリ直下の `scripts/` を絶対パスへ解決し、同梱されたwrapperを単独コマンドで実行する。現在の作業ディレクトリや共通 `$HOME/scripts` を前提にしない。
 
 ```powershell
 powershell -ExecutionPolicy Bypass -NoProfile -File "<解決したscripts>/antigravity-wrapper.ps1" -Prompt "レビューしてください" -ContextFile "C:/absolute/path/context.txt"

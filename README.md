@@ -24,7 +24,8 @@ Claude CodeまたはCodexからAntigravity CLIへ質問、レビュー、実装�
 
 - `.agents/skills/`: Codex CLI と Antigravity CLI(`agy`) が読む正本。Agent Skills標準に合わせ、frontmatterは `name` と `description` のみ。
 - `.claude/skills/`: Claude Code向け配布コピー。手動起動を保証するため `disable-model-invocation: true` と最小限の `allowed-tools` を追加。
-- `scripts/`: CLI呼び出し、実装、検収を担うクロスプラットフォームhelper。
+- `scripts/`: 開発用正本。CLI呼び出し、実装、検収を担うクロスプラットフォームhelper。
+- `*/skills/<skill>/scripts/`: 配布用コピー。各Skillは必要なhelperを同梱し、共通 `$HOME/scripts` を前提にしません。
 
 両ディレクトリの手順は同じ動作を意図しますが、frontmatterは機械的に同一化しません。機能変更時は `.agents` を先に更新し、Claude Code固有メタデータを保ったまま `.claude` へ同期してください。
 
@@ -37,8 +38,6 @@ Claude CodeまたはCodexからAntigravity CLIへ質問、レビュー、実装�
 ```powershell
 New-Item -ItemType Directory -Force "$env:USERPROFILE\.agents\skills" | Out-Null
 Get-ChildItem .agents\skills -Directory | Copy-Item -Destination "$env:USERPROFILE\.agents\skills" -Recurse -Force
-New-Item -ItemType Directory -Force "$env:USERPROFILE\scripts" | Out-Null
-Copy-Item scripts\antigravity-* "$env:USERPROFILE\scripts\" -Force
 ```
 
 ### Claude Code
@@ -48,8 +47,6 @@ Copy-Item scripts\antigravity-* "$env:USERPROFILE\scripts\" -Force
 ```powershell
 New-Item -ItemType Directory -Force "$env:USERPROFILE\.claude\skills" | Out-Null
 Get-ChildItem .claude\skills -Directory | Copy-Item -Destination "$env:USERPROFILE\.claude\skills" -Recurse -Force
-New-Item -ItemType Directory -Force "$env:USERPROFILE\scripts" | Out-Null
-Copy-Item scripts\antigravity-* "$env:USERPROFILE\scripts\" -Force
 ```
 
 ### Antigravity CLI (`agy`)
@@ -59,20 +56,30 @@ Antigravity CLI 自身のグローバルスキルとして導入します。CLI 
 ```powershell
 New-Item -ItemType Directory -Force "$env:USERPROFILE\.gemini\antigravity-cli\skills" | Out-Null
 Get-ChildItem .agents\skills -Directory | Copy-Item -Destination "$env:USERPROFILE\.gemini\antigravity-cli\skills" -Recurse -Force
-New-Item -ItemType Directory -Force "$env:USERPROFILE\.gemini\scripts" | Out-Null
-Copy-Item scripts\antigravity-* "$env:USERPROFILE\.gemini\scripts\" -Force
 ```
 
 Antigravity CLI 側では `SKILL.md` の frontmatter のうち `disable-model-invocation` や `allowed-tools` の解釈が公式ドキュメントに明記されていません(参考: [Antigravity CLI Skills](https://antigravity.google/docs/cli/plugins))。動作は代表 1 ケースで確認してから運用してください。
 
 Antigravity CLI が公式にサポートする Plugin 形式(`plugin.json` + `plugins/<name>/skills/`)でラップして `agy plugin install <path>` する経路もあります。単独スキル配布で足りない場合はこちらを検討してください。
 
-### パス解決について
+### helperと設定ファイルの配置
 
-各Skillは自身の配置場所から `../../../scripts` を解決します。プロジェクト配置ではリポジトリ直下の `scripts/` を参照します。ユーザー全体への導入では:
+各Skillは自身のディレクトリ直下の `scripts/` に必要helperを同梱しています。プロジェクト配置でもユーザー全体への導入でも、別途 `$USERPROFILE\scripts`、`$USERPROFILE\.agents\scripts`、`$USERPROFILE\.gemini\scripts` へコピーする必要はありません。
 
-- Codex / Claude Code: `$USERPROFILE\scripts\`
-- Antigravity CLI: `$USERPROFILE\.gemini\scripts\`
+一方で、モデル既定値などのruntime/user configはSkillごとに分けません。`set-antigravity-model` で保存した値を他Skillからも読むため、既定では次のbundle共有ファイルを使います。
+
+```text
+$USERPROFILE\.agents\add_antigravitycli\antigravity-wrapper.conf
+```
+
+優先順位は `-Model` / `--model`、`ANTIGRAVITY_WRAPPER_MODEL`、`ANTIGRAVITY_WRAPPER_CONFIG` または上記config、Antigravity CLI既定の順です。
+
+開発時はrepo直下 `scripts/` を正本として編集し、配布コピーは同期toolで更新します。
+
+```powershell
+powershell -ExecutionPolicy Bypass -NoProfile -File tools\sync-skill-scripts.ps1
+powershell -ExecutionPolicy Bypass -NoProfile -File tools\sync-skill-scripts.ps1 -Check
+```
 
 ## 使用例
 

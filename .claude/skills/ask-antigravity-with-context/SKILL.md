@@ -11,7 +11,7 @@ allowed-tools: Bash Read Write Grep Glob
 2. 秘密情報や無関係な内容を除外する。外部送信の可否が不明なら停止して確認する。
 3. UTF-8の一時ファイルに質問、対象説明、原文をまとめる。黙ってsize capを適用しない。
    - mediaはユーザー指定順を保持し、画像・音声・動画・PDF・異種混在を同列に扱う。
-4. この `SKILL.md` のディレクトリ（通常 `$CLAUDE_SKILL_DIR`）から `../../../scripts` を絶対パスへ解決し、wrapperを単独コマンドで呼ぶ。現在の作業ディレクトリを前提にしない。
+4. この `SKILL.md` のディレクトリ（通常 `$CLAUDE_SKILL_DIR`）直下の `scripts/` を絶対パスへ解決し、同梱されたwrapperを単独コマンドで呼ぶ。現在の作業ディレクトリや共通 `$HOME/scripts` を前提にしない。
 
 ```bash
 powershell -ExecutionPolicy Bypass -NoProfile -File "<解決したscripts>/antigravity-wrapper.ps1" -Prompt "$ARGUMENTS" -ContextFile "C:/absolute/path/context.txt"

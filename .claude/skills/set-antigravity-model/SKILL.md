@@ -7,7 +7,7 @@ allowed-tools: Bash Read
 
 # Antigravityの既定モデルを設定する
 
-`$ARGUMENTS` が空なら設定を表示し、値があればモデル名として保存する。この `SKILL.md` のディレクトリ（通常 `$CLAUDE_SKILL_DIR`）から `../../../scripts` を絶対パスへ解決し、現在の作業ディレクトリを前提にしない。
+`$ARGUMENTS` が空なら設定を表示し、値があればモデル名として保存する。この `SKILL.md` のディレクトリ（通常 `$CLAUDE_SKILL_DIR`）直下の `scripts/` を絶対パスへ解決し、現在の作業ディレクトリや共通 `$HOME/scripts` を前提にしない。
 
 ```bash
 powershell -ExecutionPolicy Bypass -NoProfile -File "<解決したscripts>/antigravity-wrapper.ps1" -ShowModel

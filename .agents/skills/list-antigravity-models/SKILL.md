@@ -5,7 +5,7 @@ description: Antigravity CLIで利用できるモデルの確認方法と、anti
 
 # Antigravityモデル設定を確認する
 
-`agy models` で利用可能モデルを確認する。この `SKILL.md` のディレクトリから `../../../scripts` を絶対パスへ解決し、OSに合うwrapperで保存設定も表示する。現在の作業ディレクトリを前提にしない。
+`agy models` で利用可能モデルを確認する。この `SKILL.md` のディレクトリ直下の `scripts/` を絶対パスへ解決し、OSに合う同梱wrapperで保存設定も表示する。現在の作業ディレクトリや共通 `$HOME/scripts` を前提にしない。
 
 ```powershell
 agy models

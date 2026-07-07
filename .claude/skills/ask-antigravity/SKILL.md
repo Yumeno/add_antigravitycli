@@ -7,7 +7,7 @@ allowed-tools: Bash Read
 
 # Antigravity CLIに質問する
 
-`$ARGUMENTS` を質問として使う。この `SKILL.md` のディレクトリ（通常 `$CLAUDE_SKILL_DIR`）から `../../../scripts` を絶対パスへ解決し、OSに合うwrapperを単独コマンドで実行する。現在の作業ディレクトリを前提にしない。
+`$ARGUMENTS` を質問として使う。この `SKILL.md` のディレクトリ（通常 `$CLAUDE_SKILL_DIR`）直下の `scripts/` を絶対パスへ解決し、OSに合う同梱wrapperを単独コマンドで実行する。現在の作業ディレクトリや共通 `$HOME/scripts` を前提にしない。
 
 ```bash
 powershell -ExecutionPolicy Bypass -NoProfile -File "<解決したscripts>/antigravity-wrapper.ps1" -Prompt "$ARGUMENTS"

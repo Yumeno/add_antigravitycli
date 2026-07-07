@@ -17,7 +17,7 @@ description: Antigravity CLIを実装担当として明示的に起動し、必�
 
 ## 実行
 
-この `SKILL.md` のディレクトリから `../../../scripts` を絶対パスへ解決し、implement helperを単独コマンドで呼ぶ。現在の作業ディレクトリを前提にしない。
+この `SKILL.md` のディレクトリ直下の `scripts/` を絶対パスへ解決し、同梱されたimplement helperを単独コマンドで呼ぶ。現在の作業ディレクトリや共通 `$HOME/scripts` を前提にしない。
 
 ```powershell
 powershell -ExecutionPolicy Bypass -NoProfile -File "<解決したscripts>/antigravity-implement.ps1" -SpecFile "C:/absolute/spec.txt" -Repo "C:/absolute/repo"

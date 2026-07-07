@@ -5,7 +5,7 @@ description: Antigravity CLIに設計判断、バグ調査、実装方針など�
 
 # Antigravity CLIに質問する
 
-ユーザーの質問を改変せず、wrapperへ渡す。現在の作業ディレクトリを前提にせず、この `SKILL.md` のディレクトリから `../../../scripts` を絶対パスへ解決する。
+ユーザーの質問を改変せず、wrapperへ渡す。現在の作業ディレクトリを前提にせず、この `SKILL.md` のディレクトリ直下の `scripts/` を絶対パスへ解決する。
 
 ## 手順
 
