@@ -44,12 +44,20 @@ Issue [#4](https://github.com/Yumeno/add_antigravitycli/issues/4) の実装。RE
 
 再発防止として crash recovery ケース(`.old` だけが残る状態からの再実行)を全 6 テストに追加。
 
+### 第2ラウンド(再レビュー → テストのみ修正)
+
+修正後の再レビューで、前回 4 件の修正完了を確認した上で、テスト側に新規 3 件:
+
+1. **P1**: bash read-only テストの期待メッセージが `Failed to promote` 固定で、診断追加後の実際の失敗箇所(staging)と不一致。chmod が強制される Linux では正しい挙動なのに FAIL する回帰 → `Failed to (stage|retire|promote)` 許容に修正。
+2. **P1**: crash recovery テストが成功経路のみで Critical の順序退行を検知できない → 「`.old`-only 状態 + Write Deny で installer を失敗させ、`.old` の生存を確認する」ケースを追加(旧実装なら Write Deny 下でも Delete 権で `.old` が先に消えるため検知できる)。
+3. **P2**: ACL 復元を `RemoveAccessRule()` から SDDL 丸ごと保存・復元方式へ変更。
+
 ## 検証結果(修正後、ホスト側で全件再実行)
 
 | テスト | 結果 |
 |---|---|
-| test-install-{codex,claude-code,antigravity}.ps1 | 各 11/11 PASS / 0 SKIP(ACL Deny による read-only ケースが実際に発火・検証された) |
-| test-install-{codex,claude-code,antigravity}.sh | 各 8/8 PASS(read-only は Git Bash で chmod が強制されないため正直に SKIP 表示) |
+| test-install-{codex,claude-code,antigravity}.ps1 | 各 12/12 PASS / 0 SKIP(ACL Deny の 2 ケースとも実発火・検証) |
+| test-install-{codex,claude-code,antigravity}.sh | 各 7 PASS / 2 SKIP(chmod 非強制の Git Bash では権限系 2 ケースを正直に SKIP) |
 | 既存 test-wrapper.{ps1,sh} | 13/13 / 9/9 PASS |
 | 既存 test-verify.{ps1,sh} | PASS / 12/12 PASS |
 | 既存 test-implement.{ps1,sh} | PASS / 3/3 PASS |
