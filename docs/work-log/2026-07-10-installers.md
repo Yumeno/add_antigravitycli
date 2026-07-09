@@ -33,21 +33,35 @@ Issue [#4](https://github.com/Yumeno/add_antigravitycli/issues/4) の実装。RE
   - 日本語を含む一時ディレクトリ名(ps1)、スペースを含むパス(bash)で耐性を同時検証
 - README: インストール節を installer 呼び出しへ書き換え。引数上書き・非破壊契約・アンインストール手順(手動削除、bundle 共有設定は残す)を明記
 
-## 検証結果(ホスト側で全件再実行)
+## レビューラウンド(Codex レビュー → 差し戻し修正)
+
+初回実装を Codex にレビューさせたところ Critical 1 + Major 3 が確定し、同一 PR 内で修正した。
+
+1. **【Critical】`.old` の削除順序**: 初回実装は promote 前に `.new` と `.old` を一括削除しており、「前回実行が retire 後にクラッシュして `.old` が旧版の唯一コピー」という状態からの再実行で旧版を失う。移植元と同じ「`.old` の吸収は final が存在する時の retire 直前のみ」に修正。
+2. **【Major】staging / retire 失敗時の診断欠落**: `set -e` / `$ErrorActionPreference=Stop` で skill 名入り診断なしに即死していた。`Failed to stage new skill:` / `Failed to retire current skill:` を追加。
+3. **【Major】claude-code / antigravity 用 ps1 テストが shim**: `$Installer` を設定するだけで codex 用テストを再実行する 1 行 shim になっており、自分の installer を検証していなかった。完全な独立テストに書き直し。
+4. **【Major】read-only ACL テストが SKIP 固定**: `Write-Host "SKIP..."` を PASS として数えており、初回検収時の「read-only ケースも実 PASS」という記録は誤りだった(この作業記録の初版にもその誤記があった)。ACL Deny + セルフプローブ + finally 復元の実テストに書き直し、SKIP は独立カウントに変更。
+
+再発防止として crash recovery ケース(`.old` だけが残る状態からの再実行)を全 6 テストに追加。
+
+## 検証結果(修正後、ホスト側で全件再実行)
 
 | テスト | 結果 |
 |---|---|
-| test-install-codex.ps1 / claude-code.ps1 / antigravity.ps1 | 各 10/10 PASS(read-only ケースも実 PASS = rollback パスが Windows で実際に発火) |
-| test-install-codex.sh / claude-code.sh / antigravity.sh | 各 7/7 PASS |
-| 既存 test-wrapper.ps1 | 13/13 PASS |
-| 既存 test-wrapper.sh | 9/9 PASS |
+| test-install-{codex,claude-code,antigravity}.ps1 | 各 11/11 PASS / 0 SKIP(ACL Deny による read-only ケースが実際に発火・検証された) |
+| test-install-{codex,claude-code,antigravity}.sh | 各 8/8 PASS(read-only は Git Bash で chmod が強制されないため正直に SKIP 表示) |
+| 既存 test-wrapper.{ps1,sh} | 13/13 / 9/9 PASS |
 | 既存 test-verify.{ps1,sh} | PASS / 12/12 PASS |
 | 既存 test-implement.{ps1,sh} | PASS / 3/3 PASS |
 | 既存 test-skill-bundles.ps1 | PASS |
 
-`codex-verify check`: VIOLATION なし。変更ファイルは Codex 報告と一致。
+`codex-verify check`: 両ラウンドとも VIOLATION なし。変更ファイルは Codex 報告と一致。
+
+## 教訓
+
+- Codex の「PASS」報告と、テストコードの実体は別物。初回はテストの中身(shim・SKIP 固定)を読まずに PASS 数だけで検収し、誤った記録を残した。**テストが「何を検証して PASS したのか」をコードで確認するまで検収完了としない。**
 
 ## 残課題
 
 - `-Uninstall` フラグは未実装(移植元と同じく手動削除手順で対応)
-- Linux 実機での bash テストは未実行(Git Bash では全 PASS)→ 姉妹リポジトリ #40 と同種の CI 課題
+- Linux 実機での bash テストは未実行(Git Bash では全 PASS、read-only ケースは SKIP)→ 姉妹リポジトリ #40 と同種の CI 課題

@@ -16,9 +16,13 @@ try {
     foreach ($name in $Names) {
         $final = Join-Path $SkillsRoot $name; $new = "$final.new"; $old = "$final.old"
         Remove-Item -LiteralPath $new -Recurse -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $old -Recurse -Force -ErrorAction SilentlyContinue
-        Move-Item -LiteralPath (Join-Path $Stage "skills\$name") -Destination $new -ErrorAction Stop
-        if (Test-Path -LiteralPath $final) { Move-Item -LiteralPath $final -Destination $old -ErrorAction Stop }
+        try { Move-Item -LiteralPath (Join-Path $Stage "skills\$name") -Destination $new -ErrorAction Stop }
+        catch { throw "Failed to stage new skill: $name" }
+        if (Test-Path -LiteralPath $final) {
+            Remove-Item -LiteralPath $old -Recurse -Force -ErrorAction SilentlyContinue
+            try { Move-Item -LiteralPath $final -Destination $old -ErrorAction Stop }
+            catch { throw "Failed to retire current skill: $name" }
+        }
         try { Move-Item -LiteralPath $new -Destination $final -ErrorAction Stop }
         catch {
             if (Test-Path -LiteralPath $old) { try { Move-Item -LiteralPath $old -Destination $final -ErrorAction Stop } catch { [Console]::Error.WriteLine("Rollback also failed for ${name} (leftover: $old): $_") } }
