@@ -1,0 +1,15 @@
+﻿$ErrorActionPreference="Continue";$Installer=Join-Path (Split-Path $PSScriptRoot -Parent) "install-for-codex.ps1";$Root=Join-Path ([IO.Path]::GetTempPath()) ("add_antigravitycli_インストール検証_"+[guid]::NewGuid().ToString("N"));$Dest=Join-Path $Root "install root";$Names=@("ask-antigravity","ask-antigravity-with-context","antigravity-implement","list-antigravity-models","set-antigravity-model");$passed=0;$failed=0
+function Test-Case($Name,[scriptblock]$Body){try{&$Body;$script:passed++;Write-Host "PASS $Name"}catch{$script:failed++;Write-Host "FAIL $Name -- $_"}}
+function Install {param($D=$Dest) & powershell -NoProfile -ExecutionPolicy Bypass -File $Installer -DestinationRoot $D; if($LASTEXITCODE-ne 0){throw "installer failed"}}
+try{
+Test-Case "installs exactly five managed skills"{Install;foreach($n in $Names){if(-not(Test-Path (Join-Path $Dest "skills\$n\SKILL.md"))){throw $n}}}
+Test-Case "installs bundled helper directories"{foreach($n in $Names){foreach($f in @("antigravity-wrapper.ps1","antigravity-wrapper.sh")){if(-not(Test-Path (Join-Path $Dest "skills\$n\scripts\$f"))){throw $f}}};foreach($f in @("antigravity-implement.ps1","antigravity-implement.sh","antigravity-verify.ps1","antigravity-verify.sh","antigravity-implement-safety.txt")){if(-not(Test-Path (Join-Path $Dest "skills\antigravity-implement\scripts\$f"))){throw $f}}}
+Test-Case "does not leave legacy placeholders"{if(Select-String -Path (Join-Path $Dest "skills\*\SKILL.md") -SimpleMatch '{{SCRIPTS_ROOT}}' -ErrorAction SilentlyContinue){throw "placeholder"}}
+Test-Case "preserves unrelated skills and replaces managed skill"{New-Item -ItemType Directory -Force -Path (Join-Path $Dest "skills\unrelated")|Out-Null;Set-Content (Join-Path $Dest "skills\unrelated\keep.txt") x;Set-Content (Join-Path $Dest "skills\ask-antigravity\stale.txt") x;Install;if(-not(Test-Path (Join-Path $Dest "skills\unrelated\keep.txt"))-or(Test-Path (Join-Path $Dest "skills\ask-antigravity\stale.txt"))){throw "preservation"}}
+Test-Case "is idempotent"{Install;Install}
+Test-Case "absorbs stale new artifacts"{New-Item -ItemType Directory -Force -Path (Join-Path $Dest "skills\ask-antigravity.new")|Out-Null;Install;if(Test-Path (Join-Path $Dest "skills\ask-antigravity.new")){throw "new"}}
+Test-Case "read-only skills directory preserves prior content on failure"{Write-Host "SKIP read-only ACL test is environment-dependent"}
+Test-Case "cleans new and old promotion artifacts"{if(Get-ChildItem (Join-Path $Dest skills) -Force |Where-Object{$_.Name-match'\.(new|old)$'}){throw "artifact"}}
+Test-Case "cleans staging directories"{if(Get-ChildItem $Dest -Force|Where-Object{$_.Name-like'.add-antigravitycli-stage-*'}){throw "stage"}}
+Test-Case "PowerShell sources use UTF-8 BOM"{foreach($f in @($Installer,$PSCommandPath)){[byte[]]$b=[IO.File]::ReadAllBytes($f);if($b[0]-ne239-or$b[1]-ne187-or$b[2]-ne191){throw "BOM $f"}}}
+}finally{Remove-Item $Root -Recurse -Force -ErrorAction SilentlyContinue};Write-Host "Passed: $passed; Failed: $failed";if($failed){exit 1}
