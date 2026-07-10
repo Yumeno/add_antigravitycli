@@ -57,6 +57,8 @@ bash scripts/install-for-claude-code.sh
 
 Antigravity CLI 自身のグローバルスキルとして導入します。CLI 版もフォルダ + `SKILL.md` 方式(`.agents` と同じ構造)を受け付けます。ソースは `.agents/skills/` を流用します。
 
+このスキル群の主な想定ホストは Claude Code / Codex です。Antigravity CLI 自身への導入は自己呼び出しになるため用途は限定的ですが、会話履歴を持たない新規インスタンスへの同一モデル並列レビュー(fresh-context セカンドオピニオン)や、`antigravity-implement` の独立検収ハーネスとして使えます。不要であれば導入しなくて構いません。
+
 ```powershell
 powershell -ExecutionPolicy Bypass -NoProfile -File scripts\install-for-antigravity.ps1
 ```
