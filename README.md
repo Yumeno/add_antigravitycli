@@ -16,7 +16,7 @@ Claude CodeまたはCodexからAntigravity CLIへ質問、レビュー、実装�
 
 ## 前提条件
 
-- Antigravity CLI（`agy`）がインストール・認証済みであること
+- Antigravity CLI（`agy`）1.1.1 以降がインストール・認証済みであること（1.1.1 で `--print` の仕様が変わったため、それ以前のバージョンは非対応）
 - Windows PowerShell 5.1+、またはbash
 - 実装委任では対象がGitリポジトリで、開始時点のworktreeがcleanであること
 
@@ -160,6 +160,8 @@ Get-ChildItem scripts\tests\test-*.ps1 | ForEach-Object {
 ## トラブルシューティング
 
 `Please sign in...` と表示される場合は、wrapperやスキルの問題ではなくAntigravity CLIが未認証です。Antigravity CLIでサインインを完了してから再実行してください。認証を伴うE2Eを自動で繰り返さないでください。
+
+wrapper の応答が依頼と無関係に `--print-timeout` フラグの解説になる場合、bundle 内の wrapper が古い（`--print` を渡す旧版）状態です。installer を再実行して更新してください。
 
 ## ライセンス
 
