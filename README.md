@@ -36,8 +36,10 @@ Claude CodeまたはCodexからAntigravity CLIへ質問、レビュー、実装�
 プロジェクト内で使う場合は、このリポジトリの `.agents/skills/` をそのまま利用します。ユーザー全体へ導入する場合:
 
 ```powershell
-New-Item -ItemType Directory -Force "$env:USERPROFILE\.agents\skills" | Out-Null
-Get-ChildItem .agents\skills -Directory | Copy-Item -Destination "$env:USERPROFILE\.agents\skills" -Recurse -Force
+powershell -ExecutionPolicy Bypass -NoProfile -File scripts\install-for-codex.ps1
+```
+```bash
+bash scripts/install-for-codex.sh
 ```
 
 ### Claude Code
@@ -45,8 +47,10 @@ Get-ChildItem .agents\skills -Directory | Copy-Item -Destination "$env:USERPROFI
 プロジェクト内で使う場合は `.claude/skills/` を利用します。ユーザー全体へ導入する場合:
 
 ```powershell
-New-Item -ItemType Directory -Force "$env:USERPROFILE\.claude\skills" | Out-Null
-Get-ChildItem .claude\skills -Directory | Copy-Item -Destination "$env:USERPROFILE\.claude\skills" -Recurse -Force
+powershell -ExecutionPolicy Bypass -NoProfile -File scripts\install-for-claude-code.ps1
+```
+```bash
+bash scripts/install-for-claude-code.sh
 ```
 
 ### Antigravity CLI (`agy`)
@@ -54,9 +58,13 @@ Get-ChildItem .claude\skills -Directory | Copy-Item -Destination "$env:USERPROFI
 Antigravity CLI 自身のグローバルスキルとして導入します。CLI 版もフォルダ + `SKILL.md` 方式(`.agents` と同じ構造)を受け付けます。ソースは `.agents/skills/` を流用します。
 
 ```powershell
-New-Item -ItemType Directory -Force "$env:USERPROFILE\.gemini\antigravity-cli\skills" | Out-Null
-Get-ChildItem .agents\skills -Directory | Copy-Item -Destination "$env:USERPROFILE\.gemini\antigravity-cli\skills" -Recurse -Force
+powershell -ExecutionPolicy Bypass -NoProfile -File scripts\install-for-antigravity.ps1
 ```
+```bash
+bash scripts/install-for-antigravity.sh
+```
+
+各 installer は配置ルートを bash の第1引数、PowerShell の `-DestinationRoot` で上書きできます。管理対象の5 skillだけを retire-then-promote 方式で更新し、他の skill は削除しません。更新に失敗した場合は skill 単位で旧版への復元を試みます。アンインストールするには、配置先の `skills/` から管理対象5ディレクトリを手動で削除してください。`$USERPROFILE\.agents\add_antigravitycli\` の bundle 共有設定は残して構いません。
 
 Antigravity CLI 側では `SKILL.md` の frontmatter のうち `disable-model-invocation` や `allowed-tools` の解釈が公式ドキュメントに明記されていません(参考: [Antigravity CLI Skills](https://antigravity.google/docs/cli/plugins))。動作は代表 1 ケースで確認してから運用してください。
 
