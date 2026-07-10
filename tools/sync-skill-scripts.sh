@@ -89,8 +89,7 @@ for skill_root in "${skill_roots[@]}"; do
                         mismatches=1
                     fi
                 done
-                for existing in "$reference_target_dir"/*; do
-                    [[ -f "$existing" ]] || continue
+                while IFS= read -r -d '' existing; do
                     existing_name="$(basename "$existing")"
                     found=0
                     for name in "${expected_references[@]}"; do
@@ -100,7 +99,7 @@ for skill_root in "${skill_roots[@]}"; do
                         printf 'unexpected bundled reference: %s\n' "$existing" >&2
                         mismatches=1
                     fi
-                done
+                done < <(find "$reference_target_dir" -mindepth 1 -maxdepth 1 -print0)
             fi
         else
             mkdir -p "$target_dir"
@@ -112,8 +111,8 @@ for skill_root in "${skill_roots[@]}"; do
             if [[ "${#expected_references[@]}" -eq 0 ]]; then
                 [[ ! -d "$reference_target_dir" ]] || rm -rf "$reference_target_dir"
             else
+                [[ ! -d "$reference_target_dir" ]] || rm -rf "$reference_target_dir"
                 mkdir -p "$reference_target_dir"
-                find "$reference_target_dir" -maxdepth 1 -type f -delete
                 for name in "${expected_references[@]}"; do
                     cp "$reference_source_dir/$name" "$reference_target_dir/$name"
                 done

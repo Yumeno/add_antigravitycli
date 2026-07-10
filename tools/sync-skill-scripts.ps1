@@ -86,7 +86,7 @@ foreach ($skillRoot in $SkillRoots) {
                         $mismatches.Add("$($skill.FullName): reference out of sync $name")
                     }
                 }
-                foreach ($extra in Get-ChildItem -LiteralPath $referenceTargetDir -File) {
+                foreach ($extra in Get-ChildItem -LiteralPath $referenceTargetDir -Force) {
                     if ($expectedReferences -notcontains $extra.Name) {
                         $mismatches.Add("$($skill.FullName): unexpected reference $($extra.Name)")
                     }
@@ -108,9 +108,10 @@ foreach ($skillRoot in $SkillRoots) {
                     Remove-Item -LiteralPath $referenceTargetDir -Recurse -Force
                 }
             } else {
+                if (Test-Path -LiteralPath $referenceTargetDir -PathType Container) {
+                    Remove-Item -LiteralPath $referenceTargetDir -Recurse -Force
+                }
                 New-Item -ItemType Directory -Path $referenceTargetDir -Force | Out-Null
-                Get-ChildItem -LiteralPath $referenceTargetDir -File -ErrorAction SilentlyContinue |
-                    Remove-Item -Force
                 foreach ($name in $expectedReferences) {
                     Copy-Item -LiteralPath (Join-Path $ReferenceSourceDir $name) -Destination (Join-Path $referenceTargetDir $name) -Force
                 }
