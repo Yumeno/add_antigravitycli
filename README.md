@@ -2,6 +2,8 @@
 
 Claude CodeまたはCodexからAntigravity CLIへ質問、レビュー、実装委任を行うためのAgent Skillsです。
 
+> Agent Skills to delegate questions, code reviews, and implementation tasks to Google Antigravity CLI (`agy`) from Claude Code or Codex CLI. Documentation is in Japanese.
+
 ## 提供するスキル
 
 | スキル | 用途 |
@@ -162,6 +164,10 @@ Get-ChildItem scripts\tests\test-*.ps1 | ForEach-Object {
 `Please sign in...` と表示される場合は、wrapperやスキルの問題ではなくAntigravity CLIが未認証です。Antigravity CLIでサインインを完了してから再実行してください。認証を伴うE2Eを自動で繰り返さないでください。
 
 wrapper の応答が依頼と無関係に `--print-timeout` フラグの解説になる場合、bundle 内の wrapper が古い（`--print` を渡す旧版）状態です。installer を再実行して更新してください。
+
+## 運用方針
+
+個人開発・個人管理のプロジェクトです。利用・forkは歓迎しますが、issueやPRへの応答・取り込みは保証しません。脆弱性の報告は issue ではなく [SECURITY.md](SECURITY.md) の手順(GitHub Private Vulnerability Reporting)でお願いします。
 
 ## ライセンス
 
