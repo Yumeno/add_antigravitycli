@@ -17,14 +17,23 @@ new_repo() {
 }
 case_success() {
     new_repo; export FAKE_AGY_WRITE_FILE="$ROOT/new.txt"
-    PATH="$SHIM:$PATH" bash "$IMPLEMENT" --spec-file "$SPEC" --repo "$ROOT" --timeout 5 >/dev/null 2>&1
+    output="$(PATH="$SHIM:$PATH" bash "$IMPLEMENT" --spec-file "$SPEC" --repo "$ROOT" --timeout 5 2>/dev/null)"
     code=$?; unset FAKE_AGY_WRITE_FILE
-    [[ $code -eq 0 && -f "$ROOT/new.txt" && "$(cat "$SHIM/stdin")" == *'READMEを追加する'* ]]
+    [[ $code -eq 0 && -f "$ROOT/new.txt" && "$(cat "$SHIM/stdin")" == *'READMEを追加する'* ]] || return 1
+    # model response must precede the verification log
+    [[ "$output" == *'--- git status --short ---'* && "${output%%--- git status --short ---*}" == *implemented* ]]
 }
 case_dirty() {
     new_repo; printf dirty >>"$ROOT/file.txt"
     set +e; output="$(PATH="$SHIM:$PATH" bash "$IMPLEMENT" --spec-file "$SPEC" --repo "$ROOT" 2>&1)"; code=$?; set -e
     [[ $code -eq 1 && "$output" == *'must be clean'* ]]
+}
+case_wrapper_failure() {
+    new_repo; export FAKE_AGY_EXIT=7 FAKE_AGY_STDERR='fake failure'
+    set +e; output="$(PATH="$SHIM:$PATH" bash "$IMPLEMENT" --spec-file "$SPEC" --repo "$ROOT" 2>/dev/null)"; code=$?; set -e
+    unset FAKE_AGY_EXIT FAKE_AGY_STDERR
+    # exit code preserved, verify log still emitted, sentinel appended last
+    [[ $code -eq 7 && "$output" == *'--- git status --short ---'* && "${output##*--- git status --short ---}" == *'[ANTIGRAVITY_IMPLEMENT_ERROR] Antigravity run failed with exit code 7'* ]]
 }
 case_protected() {
     new_repo; export FAKE_AGY_WRITE_FILE="$ROOT/.env"
@@ -37,6 +46,7 @@ testcase() {
     if "$@"; then printf 'PASS: %s\n' "$name"; passed=$((passed+1)); else printf 'FAIL: %s\n' "$name"; fi
 }
 testcase normal_edit case_success
+testcase wrapper_failure_exit_code case_wrapper_failure
 testcase dirty_tree_refused case_dirty
 testcase protected_file_violation case_protected
 printf 'Passed: %d / %d\n' "$passed" "$total"

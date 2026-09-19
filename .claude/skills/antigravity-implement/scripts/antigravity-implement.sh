@@ -41,4 +41,9 @@ run_code=0
 check_code=0
 "$VERIFY" check --repo "$ROOT" --snapshot "$SNAP" || check_code=$?
 [[ "$check_code" -eq 0 ]] || exit "$check_code"
-exit "$run_code"
+if [[ "$run_code" -ne 0 ]]; then
+    printf '%s Antigravity run failed with exit code %s. See the wrapper output above.
+' "$ERROR" "$run_code"
+    exit "$run_code"
+fi
+exit 0
