@@ -29,7 +29,7 @@ agy 1.2.7 を print mode(tool 不使用を明示)で呼び、内部ツール `ge
 ## 判明した仕様変更(1.1.1 → 1.2.7)
 
 - 生成物の置き場が `scratch/` から `brain/<conversation-id>/` に変わり、JPEG で保存される
-- **headless + `--sandbox`(wrapper 既定)では agent のシェルコマンドが全て自動拒否される**。7 月は同条件で .NET 変換と指定パス保存が通っていたので、headless の権限処理が厳格化した(changelog に直接の記述は見つからず。1.1.27 の denied_actions 通知、1.2.2 の `unsandboxed` ルール廃止が周辺変更)
+- **headless + `--sandbox`(wrapper 既定)では、実測した `Copy-Item`、`powershell -Command`、`git status` はすべて自動拒否された**。7 月は同条件で .NET 変換と指定パス保存が通っていたので、headless の権限処理が厳格化した(changelog に直接の記述は見つからず。1.1.27 の denied_actions 通知、1.2.2 の `unsandboxed` ルール廃止が周辺変更)
 - 結果として「仕様書にリポジトリ内の絶対パスを書けば agent が保存する」という 7 月の主要知見は headless では成立しない。推奨は「agent は複製せず `ARTIFACT_PATH:` を報告 → host が複製・変換 → 検収」
 
 ## 変更内容
