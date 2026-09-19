@@ -35,9 +35,9 @@ try {
     if ($Attachment) { $args += @("-Attachment", $Attachment) }
     if ($AttachmentList) { $args += @("-AttachmentList", $AttachmentList) }
     if ($Model) { $args += @("-Model",$Model) }
-    # Stream the wrapper output live so the model's report precedes the
-    # verification log (same order as antigravity-implement.sh) and progress
-    # is visible before the timeout.
+    # Do not capture the wrapper output: it is emitted as soon as the wrapper
+    # finishes, so the agent's report precedes the verification log (same
+    # order as antigravity-implement.sh).
     & powershell -NoProfile -ExecutionPolicy Bypass -File $wrapper @args
     $code = $LASTEXITCODE
     & powershell -NoProfile -ExecutionPolicy Bypass -File $verify check -Repo $root -Snapshot $snapshot
