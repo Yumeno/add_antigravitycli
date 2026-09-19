@@ -41,8 +41,9 @@ agy 1.2.7 を print mode(tool 不使用を明示)で呼び、内部ツール `ge
 ## 検証
 
 - `sync-skill-scripts.ps1 -Check` 同期済み、`test-skill-bundles.ps1` OK
+- レビュー: agy(仕様)Round 1 で Minor 1・Nit 1(「一切実行できない」の過大表現、`toolAction`/`toolSummary` 注記)、Codex gpt-5.6-terra(文書整合)Round 1 で Major 2・Minor 1(推奨フローが helper の検収順序と矛盾、証拠ラベル不足、7 月の identity preservation 実測の欠落)→ いずれも反映
 - 試打生成物(temp リポジトリ、brain 内 JPEG 4 枚)は検証後に削除
 
 ## 残課題(別 issue)
 
-- `antigravity-implement` の画像フローは、agent 保存 → Git 検収の前提が 1.2.7 で崩れている。host 側の複製ステップを skill 手順に組み込むか、wrapper に非 sandbox の画像モードを設けるかは設計判断が要る
+- issue #17 として起票。`antigravity-implement` の画像フローは、agent 保存 → Git 検収の前提が 1.2.7 で崩れている。host 側の複製ステップを skill 手順に組み込むか、wrapper に非 sandbox の画像モードを設けるかは設計判断が要る
