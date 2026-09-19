@@ -11,6 +11,9 @@ try {
     $env:ANTIGRAVITY_WRAPPER_CONFIG=Join-Path $Root "antigravity-wrapper.conf"
     $o=& powershell -NoProfile -ExecutionPolicy Bypass -File $Script -SpecFile $Spec -Repo $Repo 2>&1
     if($LASTEXITCODE-ne 0-or($o|Out-String)-notmatch'fake response'){throw ($o|Out-String)}
+    $text=($o|Out-String);$iResp=$text.IndexOf('fake response');$iVerify=$text.IndexOf('### git status')
+    if($iVerify-lt 0-or$iResp-gt$iVerify){throw "output order: model response must precede verify log`n$text"}
+    if($text-match'snapshot created'){throw "snapshot output must be suppressed`n$text"}
     $argsSeen=Get-Content $env:FAKE_ARGS;if($argsSeen-notcontains"--sandbox"){throw "missing --sandbox"}
     if($argsSeen-contains"--dangerously-skip-permissions"){throw "unsafe flag present"}
     Set-Content (Join-Path $Repo dirty.txt) dirty

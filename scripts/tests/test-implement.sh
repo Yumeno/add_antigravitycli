@@ -17,9 +17,11 @@ new_repo() {
 }
 case_success() {
     new_repo; export FAKE_AGY_WRITE_FILE="$ROOT/new.txt"
-    PATH="$SHIM:$PATH" bash "$IMPLEMENT" --spec-file "$SPEC" --repo "$ROOT" --timeout 5 >/dev/null 2>&1
+    output="$(PATH="$SHIM:$PATH" bash "$IMPLEMENT" --spec-file "$SPEC" --repo "$ROOT" --timeout 5 2>/dev/null)"
     code=$?; unset FAKE_AGY_WRITE_FILE
-    [[ $code -eq 0 && -f "$ROOT/new.txt" && "$(cat "$SHIM/stdin")" == *'READMEを追加する'* ]]
+    [[ $code -eq 0 && -f "$ROOT/new.txt" && "$(cat "$SHIM/stdin")" == *'READMEを追加する'* ]] || return 1
+    # model response must precede the verification log
+    [[ "$output" == *'--- git status --short ---'* && "${output%%--- git status --short ---*}" == *implemented* ]]
 }
 case_dirty() {
     new_repo; printf dirty >>"$ROOT/file.txt"
