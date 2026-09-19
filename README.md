@@ -18,7 +18,7 @@ Claude CodeまたはCodexからAntigravity CLIへ質問、レビュー、実装�
 
 ## 前提条件
 
-- Antigravity CLI（`agy`）1.1.1 以降がインストール・認証済みであること（1.1.1 で `--print` の仕様が変わったため、それ以前のバージョンは非対応）
+- Antigravity CLI（`agy`）1.1.9 以降がインストール・認証済みであること（1.1.1 で `--print` の仕様が変わり、1.1.9 で print mode のスラッシュコマンド/スキル展開と `--disable-slash-commands` が追加された。wrapper は同フラグを常時付加するため、それ以前のバージョンは非対応。動作確認は 1.2.7）
 - Windows PowerShell 5.1+、またはbash
 - 実装委任では対象がGitリポジトリで、開始時点のworktreeがcleanであること
 

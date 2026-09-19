@@ -205,7 +205,7 @@ if [[ -n "$MEDIA_LINES" ]]; then
     printf '%s' "$MEDIA_LINES" >>"$INPUT_FILE"
 fi
 
-ARGS=(--print-timeout "${PRINT_TIMEOUT}s" --new-project --add-dir "$WORKDIR")
+ARGS=(--print-timeout "${PRINT_TIMEOUT}s" --disable-slash-commands --new-project --add-dir "$WORKDIR")
 [[ -z "$MEDIA_DIR" ]] || ARGS+=(--add-dir "$MEDIA_DIR")
 [[ -z "$MODEL" ]] || ARGS+=(--model "$MODEL")
 [[ "$SANDBOX" -eq 0 ]] || ARGS+=(--sandbox)

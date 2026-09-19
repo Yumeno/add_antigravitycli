@@ -205,7 +205,7 @@ try { $agy = (Get-Command agy -ErrorAction Stop).Source } catch { Fail 1 "'agy' 
 $resolvedWorkDir = (Resolve-Path -LiteralPath $WorkDir).Path
 $agyArgs = @(
     "--print-timeout", ("{0}s" -f $Timeout),
-    "--sandbox", "--new-project", "--add-dir", $resolvedWorkDir
+    "--disable-slash-commands", "--sandbox", "--new-project", "--add-dir", $resolvedWorkDir
 )
 if ($OwnedMediaDir) { $agyArgs += @("--add-dir", $OwnedMediaDir) }
 if ($Model) { $agyArgs += @("--model", $Model); [Console]::Error.WriteLine("MODEL: $Model") }
