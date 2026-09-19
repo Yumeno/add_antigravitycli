@@ -26,7 +26,7 @@ t_args() {
     PATH="$ROOT/bin:$PATH" bash "$WRAPPER" --prompt hi --model gemini/test --sandbox --timeout 9 >/dev/null 2>/dev/null &&
         ! grep -qx -- '--print' "$ROOT/argv" && grep -qx -- '--print-timeout' "$ROOT/argv" &&
         grep -qx -- '9s' "$ROOT/argv" && grep -qx -- 'gemini/test' "$ROOT/argv" &&
-        grep -qx -- '--sandbox' "$ROOT/argv" && grep -qx -- '--new-project' "$ROOT/argv" &&
+        grep -qx -- '--sandbox' "$ROOT/argv" && grep -qx -- '--disable-slash-commands' "$ROOT/argv" && grep -qx -- '--new-project' "$ROOT/argv" &&
         grep -qx -- '--add-dir' "$ROOT/argv"
 }
 t_media() {
