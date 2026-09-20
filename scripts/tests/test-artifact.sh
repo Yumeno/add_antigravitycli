@@ -214,6 +214,16 @@ t_crlf_path_rejected() {
     run_artifact import --repo "$REPO" --conversation-id conv1 --source "$CONV/img.png" --destination "$REPO/evil"$'\r'".png"
     [[ $code -ne 0 && "$output" == *'path contains a line break'* ]]
 }
+t_ads_destination_rejected() {
+    new_fixtures
+    run_artifact import --repo "$REPO" --conversation-id conv1 --source "$CONV/img.png" --destination "$REPO/.git:artifact.png"
+    [[ $code -ne 0 && "$output" == *'alternate data stream'* && -d "$REPO/.git" ]]
+}
+t_reserved_device_name_rejected() {
+    new_fixtures
+    run_artifact import --repo "$REPO" --conversation-id conv1 --source "$CONV/img.png" --destination "$REPO/nul.png"
+    [[ $code -ne 0 && "$output" == *'reserved device name'* ]]
+}
 t_overwrite_failure_keeps_original() {
     new_fixtures
     local dest="$REPO/overwrite_ok.png"
@@ -255,6 +265,8 @@ testcase png_zero_dimension_rejected t_png_zero_dimension
 testcase git_dir_case_variant_rejected t_git_dir_case_variant
 testcase temp_cleanup_on_failure t_temp_cleanup_on_failure
 testcase crlf_path_rejected t_crlf_path_rejected
+testcase ads_destination_rejected t_ads_destination_rejected
+testcase reserved_device_name_rejected t_reserved_device_name_rejected
 testcase overwrite_failure_keeps_original t_overwrite_failure_keeps_original
 
 printf 'Passed: %d / %d\n' "$passed" "$total"

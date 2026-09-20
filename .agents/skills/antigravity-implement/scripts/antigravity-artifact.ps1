@@ -89,6 +89,9 @@ function Protected([string]$RelPath) {
 
 try {
     if ($Source -match "[\r\n]" -or $Destination -match "[\r\n]") { Fail "path contains a line break" }
+    # NTFS alternate data streams (".git:x.png") would bypass the protected-path and extension
+    # checks; reject any ':' after the optional drive prefix before the path is resolved.
+    if (($Destination -replace '^[A-Za-z]:', '') -match ':') { Fail "Destination name must not contain ':' (alternate data stream): $Destination" }
     if ([string]::IsNullOrEmpty($ConversationId) -or $ConversationId -notmatch '^[A-Za-z0-9-]+$' -or $ConversationId.Contains("..")) {
         Fail "Invalid conversation id: $ConversationId"
     }
@@ -183,6 +186,9 @@ try {
     if (Test-AnyComponentIsLink $destParent) { Fail "Destination parent must not contain a link" }
     $destParentReal = Get-Win32RealPath $destParent
     $destName = Split-Path -Leaf $destFull
+    # NTFS alternate data streams (".git:x.png") and reserved device names would bypass the
+    # protected-path and extension checks below and are never a valid regular-file destination.
+    if ([IO.Path]::GetFileNameWithoutExtension($destName) -match '^(?i)(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$') { Fail "Destination name is a reserved device name: $destName" }
     $destResolved = Join-Path $destParentReal $destName
     $rootPrefix = $root.TrimEnd("\","/") + [IO.Path]::DirectorySeparatorChar
     if (-not $destResolved.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {

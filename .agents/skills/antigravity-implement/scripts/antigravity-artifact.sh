@@ -186,6 +186,12 @@ case "$DEST_RESOLVED" in
     *) die "Destination must be inside the repository: $DEST" ;;
 esac
 DEST_REL="${DEST_RESOLVED#"$ROOT"/}"
+# NTFS alternate data streams (".git:x.png") and reserved device names would bypass the
+# protected-path and extension checks and are never a valid regular-file destination.
+DEST_LEAF="${DEST_REL##*/}"
+case "$DEST_LEAF" in *:*) die "Destination name must not contain ':' (alternate data stream): $DEST_LEAF" ;; esac
+DEST_STEM="$(printf '%s' "${DEST_LEAF%.*}" | LC_ALL=C tr '[:lower:]' '[:upper:]')"
+case "$DEST_STEM" in CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9]) die "Destination name is a reserved device name: $DEST_LEAF" ;; esac
 
 # Protected-path and extension checks are case-insensitive: normalize with LC_ALL=C tr so
 # the comparison does not depend on locale-specific case folding.

@@ -32,6 +32,11 @@ Issue [#17](https://github.com/Yumeno/add_antigravitycli/issues/17) PR-B。agy 1
 - Minor 2: 成功行のパスに改行があると 1 行形式が崩れる → CR/LF を含むパスは拒否し、`source=` / `destination=` を末尾固定。テストが安全境界を pin していない → SOF2・APPn・不正長・切り詰め・IHDR 長・巨大寸法・`.GIT`・temp 残留・CR 拒否のケースを追加
 - Nit: 未使用の `$jpegSig` を削除
 
+## レビュー Round 2
+
+- agy(仕様): NO MAJOR FINDINGS / CONVERGED。JSON の `conversation_id` と `brain/<id>/` は 1:1 で同一と確認
+- Codex gpt-5.6-terra(コード): Major 1(PowerShell 版で destination に NTFS 代替データストリーム `.git:artifact.png` を指定でき保護判定を迂回)→ 両版で、ドライブ指定以外の `:` を含む destination と Windows の予約デバイス名(`CON` / `NUL` / `COM1` 等)をパス解決前に拒否。テスト 2 件追加(両版 30/30)
+
 ## 変更内容
 
 - `scripts/antigravity-artifact.{ps1,sh}`: 新規(上記設計 + Round 1 反映: `-ConversationId` 必須、mktemp 排他作成、複製データの hash 照合、構造長検証、寸法上限、大文字小文字正規化、改行パス拒否、脅威モデル明記)

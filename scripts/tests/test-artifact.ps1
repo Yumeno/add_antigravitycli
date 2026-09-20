@@ -237,6 +237,17 @@ try {
         if ($r.Code -eq 0 -or $r.Output -notmatch "path contains a line break") { throw $r.Output }
     }
 
+    Test-Case "ads_destination_rejected" {
+        $r = Invoke-Artifact @("import","-Repo",$Repo,"-ConversationId","conv1","-Source",(Join-Path $Conv "img.png"),"-Destination",(Join-Path $Repo ".git:artifact.png"))
+        if ($r.Code -eq 0 -or $r.Output -notmatch "alternate data stream") { throw $r.Output }
+        if (Test-Path -LiteralPath (Join-Path $Repo ".git") -PathType Leaf) { throw ".git became a file" }
+    }
+
+    Test-Case "reserved_device_name_rejected" {
+        $r = Invoke-Artifact @("import","-Repo",$Repo,"-ConversationId","conv1","-Source",(Join-Path $Conv "img.png"),"-Destination",(Join-Path $Repo "nul.png"))
+        if ($r.Code -eq 0 -or $r.Output -notmatch "reserved device name") { throw $r.Output }
+    }
+
     Test-Case "git_dir_case_variant_rejected" {
         $r = Invoke-Artifact @("import","-Repo",$Repo,"-ConversationId","conv1","-Source",(Join-Path $Conv "img.png"),"-Destination",(Join-Path $Repo ".GIT\x.png"))
         if ($r.Code -eq 0) { throw $r.Output }
