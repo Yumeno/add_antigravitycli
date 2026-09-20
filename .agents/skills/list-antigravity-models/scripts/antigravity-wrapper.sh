@@ -340,7 +340,7 @@ for line in sys.stdin:
     line = line.rstrip("\n").rstrip("\r")
     if first_line:
         first_line = False
-        if line.startswith("﻿"):
+        if line.startswith("\ufeff"):
             line = line[1:]
     if not line:
         continue

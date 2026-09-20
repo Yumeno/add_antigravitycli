@@ -42,6 +42,11 @@ Issue [#16](https://github.com/Yumeno/add_antigravitycli/issues/16)。PowerShell
 - agy(仕様): Major 3 → (1) 本文を流した後に stdout へ sentinel が結合する → 直前に改行を補う(拒否行と同じ扱いを全エラー経路へ)、(2) `event: "error"` の未処理で根本原因が隠れる → stderr に `ANTIGRAVITY: fatal_error=` を出し、`result` 欠落時の失敗文に含める、(3) PS 版の出力エンコーディングが cp932 で壊れる → wrapper 冒頭で `[Console]::OutputEncoding` を UTF-8 にしており、実機でも UTF-8 バイト列を確認済みのため否定(ただし子プロセスのデコード設定は Codex 指摘のとおり明示化)。Minor: 非 JSON 行の可視化、未知 step_type(`thought` 等)の進捗表示。Nit: work-log の断定表現 → すべて反映
 - Codex gpt-5.6-terra(コード): Major 3 → (1) `ProcessStartInfo.StandardOutputEncoding` 未設定 → 明示設定(実機では Console 設定の継承で動いていた)、(2) parser の異常終了(exit 1 等、EPIPE)が「result 欠落」と誤診される → parser の exit を伝播、(3) 途中の壊れた行を黙って無視し成功扱い → **失敗にはせず** stderr に件数と先頭 500 バイトを warning として出し、`result` が無い場合は失敗文に含める(agy が「上流の通知等で非 JSON 行が混ざり得る」と述べており、装飾的な行で毎回失敗する方が実害が大きいと判断)。Minor: PS 版の先頭 BOM、全 delta と raw の全量保持 → SHA-256 と先頭 500 バイトに、`timeout --kill-after`、PS の deadline 境界、liveness テストの内容検証、`date +%s%N` の移植性 → 反映
 
+## レビュー Round 2
+
+- agy(仕様): NO MAJOR FINDINGS / CONVERGED。非 JSON 行を warning に留める方針は「実出力に上流由来の行が混ざり得るため妥当」と確認。Minor 1(Python parser の BOM 除去が不可視文字リテラルで、欠落すると `startswith("")` が常に真になり先頭 1 文字を削る事故になる)→ `"﻿"` の明示表記に修正。Nit(未知 step の DONE も出すか)は意図的な抑制として見送り
+- Codex gpt-5.6-terra(コード): NO MAJOR FINDINGS / CONVERGED。非 JSON 行の方針は「件数と先頭断片を必ず stderr に出し、result 欠落時は失敗文に取り込む実装なら Major ではない」と判断
+
 ## 検証
 
 - unit: test-wrapper.sh 36/36 を python 既定・node 強制・jq 強制(buffered fallback)の 3 経路で実行、test-wrapper.ps1 37/37、test-implement 両版(26/26、OK)、test-artifact 両版 30/30、test-skill-bundles OK、sync -Check 同期済み
