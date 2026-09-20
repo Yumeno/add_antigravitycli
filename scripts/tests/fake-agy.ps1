@@ -59,6 +59,14 @@ function Write-StreamEnvelope([string]$Response) {
     Write-Line @{ event = "init"; conversation_id = "fake"; init = @{} }
     Write-Line @{ event = "step_update"; step_update = @{ conversation_id = "fake"; step_index = 0; state = "DONE"; step_type = "user_input" } }
 
+    $garbage = ($env:FAKE_GARBAGE_LINE -eq "1") -or ($env:FAKE_AGY_GARBAGE_LINE -eq "1")
+    if ($garbage) { [Console]::Out.Write("not json and no event field`n"); [Console]::Out.Flush() }
+
+    $thoughtStep = ($env:FAKE_THOUGHT_STEP -eq "1") -or ($env:FAKE_AGY_THOUGHT_STEP -eq "1")
+    if ($thoughtStep) {
+        Write-Line @{ event = "step_update"; step_update = @{ conversation_id = "fake"; step_index = 1; state = "ACTIVE"; step_type = "thought" } }
+    }
+
     if ($Response.Length -gt 0) {
         $half = [Math]::Ceiling($Response.Length / 2.0)
         $first = $Response.Substring(0, $half)
@@ -74,6 +82,12 @@ function Write-StreamEnvelope([string]$Response) {
     if ($toolEvent) {
         Write-Line @{ event = "step_update"; step_update = @{ conversation_id = "fake"; step_index = 2; state = "ACTIVE"; step_type = "tool"; tool_name = "run_command"; tool_info = @{ parameters = @{ command = "echo hi" } } } }
         Write-Line @{ event = "step_update"; step_update = @{ conversation_id = "fake"; step_index = 2; state = "DONE"; step_type = "tool"; tool_name = "run_command"; tool_info = @{ parameters = @{ command = "echo hi" }; error = @{ type = "TOOL_ERROR"; message = "context canceled" } } } }
+    }
+
+    $errorEvent = ($env:FAKE_ERROR_EVENT -eq "1") -or ($env:FAKE_AGY_ERROR_EVENT -eq "1")
+    if ($errorEvent) {
+        Write-Line @{ event = "error"; error = @{ type = "FATAL"; message = "fake fatal error" } }
+        return
     }
 
     $noResult = ($env:FAKE_NO_RESULT -eq "1") -or ($env:FAKE_AGY_NO_RESULT -eq "1")

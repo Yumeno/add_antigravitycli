@@ -8,8 +8,9 @@ Issue [#16](https://github.com/Yumeno/add_antigravitycli/issues/16)。PowerShell
 
 1 行 1 JSON:
 - `{"event":"init","conversation_id":"<id>","init":{...}}` が先頭
-- `{"event":"step_update","step_update":{"step_index":N,"state":"ACTIVE"|"DONE","step_type":"user_input"|"agent_response"|"tool",...}}`。`agent_response` は `text_delta`(本文の断片。最後の DONE に末尾の改行が乗ることが多い)、`tool` は `tool_name` と `tool_info.parameters`、DONE 時に `tool_info.error.{type,message}`(拒否されたコマンドは `TOOL_ERROR` / `context canceled`)
-- `{"event":"result","result":{"status","response","denied_actions",...}}` が末尾。`response` は全 `text_delta` の連結と一致
+- `{"event":"step_update","step_update":{"step_index":N,"state":"ACTIVE"|"DONE","step_type":"user_input"|"agent_response"|"tool",...}}`。`agent_response` は `text_delta`(本文の断片。ACTIVE で複数回来るのが本来で、実測では最後の DONE に末尾の改行が乗った)、`tool` は `tool_name` と `tool_info.parameters`、DONE 時に `tool_info.error.{type,message}`(拒否されたコマンドは `TOOL_ERROR` / `context canceled`)
+- `{"event":"result","result":{"status","response","denied_actions",...}}` が末尾(実測 3 件)。実測した単一応答では `response` は全 `text_delta` の連結と一致したが、agy 自身のレビューによれば tool 呼び出しを挟む複数ターンや正規化で差異が出る場合があり、`result` の後に行が続く・異常終了で `result` が無い場合もある(UNSURE 付き)。wrapper は差異を warning にとどめ、`result` 欠落は失敗にする
+- agy のレビューが挙げたその他のイベント: `{"event":"error","error":{"type","message"}}`(致命的エラー時)、`thought` / `reasoning` 等の step_type(思考モデル)。実測では未観測(UNSURE)だが、wrapper は未知イベントを stderr に可視化する
 
 ## 体制
 
@@ -36,7 +37,13 @@ Issue [#16](https://github.com/Yumeno/add_antigravitycli/issues/16)。PowerShell
 - Node parser の `process.exit()` を `process.exitCode` に変更(パイプ先で stdout が切り捨てられる既知の問題の回避)
 - Sonnet が「自動で入った変更」と誤認して私の work-log と README の編集を削除していたため復元
 
+## レビュー Round 1 と反映
+
+- agy(仕様): Major 3 → (1) 本文を流した後に stdout へ sentinel が結合する → 直前に改行を補う(拒否行と同じ扱いを全エラー経路へ)、(2) `event: "error"` の未処理で根本原因が隠れる → stderr に `ANTIGRAVITY: fatal_error=` を出し、`result` 欠落時の失敗文に含める、(3) PS 版の出力エンコーディングが cp932 で壊れる → wrapper 冒頭で `[Console]::OutputEncoding` を UTF-8 にしており、実機でも UTF-8 バイト列を確認済みのため否定(ただし子プロセスのデコード設定は Codex 指摘のとおり明示化)。Minor: 非 JSON 行の可視化、未知 step_type(`thought` 等)の進捗表示。Nit: work-log の断定表現 → すべて反映
+- Codex gpt-5.6-terra(コード): Major 3 → (1) `ProcessStartInfo.StandardOutputEncoding` 未設定 → 明示設定(実機では Console 設定の継承で動いていた)、(2) parser の異常終了(exit 1 等、EPIPE)が「result 欠落」と誤診される → parser の exit を伝播、(3) 途中の壊れた行を黙って無視し成功扱い → **失敗にはせず** stderr に件数と先頭 500 バイトを warning として出し、`result` が無い場合は失敗文に含める(agy が「上流の通知等で非 JSON 行が混ざり得る」と述べており、装飾的な行で毎回失敗する方が実害が大きいと判断)。Minor: PS 版の先頭 BOM、全 delta と raw の全量保持 → SHA-256 と先頭 500 バイトに、`timeout --kill-after`、PS の deadline 境界、liveness テストの内容検証、`date +%s%N` の移植性 → 反映
+
 ## 検証
 
-- unit: test-wrapper.sh 30/30 を python 既定・node 強制・jq 強制(buffered fallback)の 3 経路で実行、test-wrapper.ps1 32/32、test-implement 両版(26/26、OK)、test-artifact 両版 30/30、test-skill-bundles OK、sync -Check 同期済み
+- unit: test-wrapper.sh 36/36 を python 既定・node 強制・jq 強制(buffered fallback)の 3 経路で実行、test-wrapper.ps1 37/37、test-implement 両版(26/26、OK)、test-artifact 両版 30/30、test-skill-bundles OK、sync -Check 同期済み
 - 実 agy 1.2.7 E2E(両版): README を読ませる依頼で `ANTIGRAVITY: tool=view_file state=ACTIVE/DONE` が先に stderr に出てから本文が届く。`git status` を打たせる依頼は `tool=run_command ... error=TOOL_ERROR: context canceled` の後に従来どおり拒否 sentinel で exit 1(node 経路でも同じ)。3 秒タイムアウトは両版 exit 2
+- Round 1 反映後の再 E2E: 両版で日本語を含む本文が UTF-8 バイト列のまま逐次出力(PS 版は od で確認)、tool 進捗、拒否 sentinel(stderr tail 付き)を再確認

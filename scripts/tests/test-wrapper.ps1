@@ -231,23 +231,35 @@ try {
         if(-not [Linq.Enumerable]::SequenceEqual([byte[]]$r.Bytes,[byte[]]$expected)){throw ("stdout bytes differ: got " + (($r.Bytes|ForEach-Object{'{0:x2}' -f $_}) -join ' '))}
     }
     Case "liveness streamed delta before exit" {
+        # ASCII-only response so the first-chunk byte comparison against the fake's first-half
+        # split is unambiguous (no multi-byte UTF-8 sequence can straddle the split point).
+        $response = "fake response ascii only 0123456789"
+        $expectedFirst = $response.Substring(0, [Math]::Ceiling($response.Length / 2.0))
         $env:FAKE_MODE="success"; $env:FAKE_STREAM_DELAY="3"
+        $respFile = Join-Path $Root "liveness_response.txt"
+        [IO.File]::WriteAllText($respFile,$response,(New-Object Text.UTF8Encoding($false)))
+        $env:FAKE_RESPONSE_FILE=$respFile
         $outFile = Join-Path $Root ("live_out_" + [guid]::NewGuid().ToString("N") + ".txt")
         $errFile = Join-Path $Root ("live_err_" + [guid]::NewGuid().ToString("N") + ".txt")
         New-Item -ItemType File -Path $outFile -Force | Out-Null
         $allArgs = @("-NoProfile","-ExecutionPolicy","Bypass","-File",$Wrapper,"-Prompt","x")
         $p = Start-Process -FilePath "powershell" -ArgumentList $allArgs -RedirectStandardOutput $outFile -RedirectStandardError $errFile -PassThru -NoNewWindow
         $firstNonEmpty = $null
+        $firstChunk = $null
         while (-not $p.HasExited) {
-            if (-not $firstNonEmpty -and (Get-Item -LiteralPath $outFile).Length -gt 0) { $firstNonEmpty = [DateTime]::UtcNow }
+            if (-not $firstNonEmpty -and (Get-Item -LiteralPath $outFile).Length -gt 0) {
+                $firstNonEmpty = [DateTime]::UtcNow
+                $firstChunk = Get-Content -LiteralPath $outFile -Raw -Encoding UTF8
+            }
             Start-Sleep -Milliseconds 200
         }
         $exitTime = [DateTime]::UtcNow
         $p.WaitForExit()
-        Remove-Item Env:FAKE_STREAM_DELAY -ErrorAction SilentlyContinue
+        Remove-Item Env:FAKE_STREAM_DELAY,Env:FAKE_RESPONSE_FILE -ErrorAction SilentlyContinue
         if (-not $firstNonEmpty) { throw "no output observed before exit" }
+        if ($firstChunk -ne $expectedFirst) { throw "first chunk mismatch: got '$firstChunk' expected '$expectedFirst'" }
         $gap = ($exitTime - $firstNonEmpty).TotalSeconds
-        Remove-Item -LiteralPath $outFile,$errFile -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $outFile,$errFile,$respFile -ErrorAction SilentlyContinue
         if ($gap -lt 2) { throw "first delta arrived only $gap s before exit" }
     }
     Case "tool_progress_on_stderr" {
@@ -275,6 +287,49 @@ try {
         if($r.Code-ne 0){throw "$($r.Out)`n$($r.Err)"}
         $expected="no trailing newline here`n[ANTIGRAVITY_DENIED_ACTIONS] command (Bash)`n"
         if($r.Out-notmatch[regex]::Escape($expected)){throw "unexpected stdout: $($r.Out)"}
+    }
+    Case "utf8_delta_bytes" {
+        $env:FAKE_MODE="success"
+        $utf8File=Join-Path $Root "utf8_response.txt"
+        $utf8Text="日本語のテキストです。絵文字も入ります: 😀 end"
+        [IO.File]::WriteAllText($utf8File,$utf8Text,(New-Object Text.UTF8Encoding($false)))
+        $env:FAKE_RESPONSE_FILE=$utf8File
+        $r=RunBytes @("-Prompt","x")
+        Remove-Item Env:FAKE_RESPONSE_FILE -ErrorAction SilentlyContinue
+        if($r.Code-ne 0){throw "exit $($r.Code)"}
+        $expected=[IO.File]::ReadAllBytes($utf8File)
+        if(-not [Linq.Enumerable]::SequenceEqual([byte[]]$r.Bytes,[byte[]]$expected)){throw "stdout bytes differ from utf8 response file"}
+    }
+    Case "malformed_mid_stream_warning" {
+        $env:FAKE_MODE="success"; $env:FAKE_GARBAGE_LINE="1"
+        $r=RunSplit @("-Prompt","x")
+        Remove-Item Env:FAKE_GARBAGE_LINE -ErrorAction SilentlyContinue
+        if($r.Code-ne 0-or$r.Out-notmatch'fake response'){throw "$($r.Out)`n$($r.Err)"}
+        if($r.Err-notmatch'non-JSON line\(s\) ignored'){throw "missing malformed warning: $($r.Err)"}
+    }
+    Case "fatal_error_event" {
+        $env:FAKE_MODE="success"; $env:FAKE_ERROR_EVENT="1"
+        $r=Run @("-Prompt","x")
+        Remove-Item Env:FAKE_ERROR_EVENT -ErrorAction SilentlyContinue
+        if($r.Code-ne 1-or$r.Text-notmatch'fatal error'-or$r.Text-notmatch'fake fatal error'){throw $r.Text}
+    }
+    Case "unknown_step_progress" {
+        $env:FAKE_MODE="success"; $env:FAKE_THOUGHT_STEP="1"
+        $r=RunSplit @("-Prompt","x")
+        Remove-Item Env:FAKE_THOUGHT_STEP -ErrorAction SilentlyContinue
+        if($r.Code-ne 0-or$r.Out-notmatch'fake response'){throw "$($r.Out)`n$($r.Err)"}
+        if($r.Err-notmatch'ANTIGRAVITY: step=thought state=ACTIVE'){throw "missing step progress: $($r.Err)"}
+        if($r.Out-match'step=thought'){throw "unknown step text leaked to stdout: $($r.Out)"}
+    }
+    Case "error_sentinel_on_new_line" {
+        $env:FAKE_MODE="success"; $env:FAKE_NO_RESULT="1"
+        $noNewlineFile=Join-Path $Root "no_newline_error_response.txt"
+        [IO.File]::WriteAllText($noNewlineFile,"no trailing newline before error",(New-Object Text.UTF8Encoding($false)))
+        $env:FAKE_RESPONSE_FILE=$noNewlineFile
+        $r=RunSplit @("-Prompt","x")
+        Remove-Item Env:FAKE_NO_RESULT,Env:FAKE_RESPONSE_FILE -ErrorAction SilentlyContinue
+        if($r.Code-ne 1){throw "$($r.Out)`n$($r.Err)"}
+        if($r.Out-notmatch[regex]::Escape("no trailing newline before error`n[ANTIGRAVITY_WRAPPER_ERROR]")){throw "sentinel not on new line: $($r.Out)"}
     }
 } finally {
     $env:PATH=$oldPath; Remove-Item Env:ANTIGRAVITY_WRAPPER_MODEL -ErrorAction SilentlyContinue

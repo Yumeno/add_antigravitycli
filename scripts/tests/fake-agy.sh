@@ -162,9 +162,15 @@ write_stream() {
     [[ "${FAKE_TOOL_EVENT:-}" == "1" || "${FAKE_AGY_TOOL_EVENT:-}" == "1" ]] && tool_event=1
     local no_result=0
     [[ "${FAKE_NO_RESULT:-}" == "1" || "${FAKE_AGY_NO_RESULT:-}" == "1" ]] && no_result=1
+    local garbage_line=0
+    [[ "${FAKE_GARBAGE_LINE:-}" == "1" || "${FAKE_AGY_GARBAGE_LINE:-}" == "1" ]] && garbage_line=1
+    local thought_step=0
+    [[ "${FAKE_THOUGHT_STEP:-}" == "1" || "${FAKE_AGY_THOUGHT_STEP:-}" == "1" ]] && thought_step=1
+    local error_event=0
+    [[ "${FAKE_ERROR_EVENT:-}" == "1" || "${FAKE_AGY_ERROR_EVENT:-}" == "1" ]] && error_event=1
     case "$encoder" in
         python3|python)
-            "$encoder" - "$response_file" "${FAKE_AGY_STATUS:-SUCCESS}" "${FAKE_AGY_DENIED:-}" "${FAKE_AGY_DENIED_SHAPE:-}" "$delay" "$tool_event" "$no_result" <<'PYEOF'
+            "$encoder" - "$response_file" "${FAKE_AGY_STATUS:-SUCCESS}" "${FAKE_AGY_DENIED:-}" "${FAKE_AGY_DENIED_SHAPE:-}" "$delay" "$tool_event" "$no_result" "$garbage_line" "$thought_step" "$error_event" <<'PYEOF'
 import json, sys, time
 try:
     if hasattr(sys.stdout, "reconfigure"):
@@ -172,7 +178,7 @@ try:
 except Exception:
     pass
 
-response_file, status, denied_raw, shape, delay, tool_event, no_result = sys.argv[1:8]
+response_file, status, denied_raw, shape, delay, tool_event, no_result, garbage_line, thought_step, error_event = sys.argv[1:11]
 with open(response_file, encoding="utf-8", newline="") as f:
     response = f.read()
 
@@ -183,6 +189,13 @@ def emit(obj):
 
 emit({"event": "init", "conversation_id": "fake", "init": {}})
 emit({"event": "step_update", "step_update": {"conversation_id": "fake", "step_index": 0, "state": "DONE", "step_type": "user_input"}})
+
+if garbage_line == "1":
+    sys.stdout.write("not json and no event field\n")
+    sys.stdout.flush()
+
+if thought_step == "1":
+    emit({"event": "step_update", "step_update": {"conversation_id": "fake", "step_index": 1, "state": "ACTIVE", "step_type": "thought"}})
 
 if response:
     half = (len(response) + 1) // 2
@@ -195,6 +208,10 @@ if response:
 if tool_event == "1":
     emit({"event": "step_update", "step_update": {"conversation_id": "fake", "step_index": 2, "state": "ACTIVE", "step_type": "tool", "tool_name": "run_command", "tool_info": {"parameters": {"command": "echo hi"}}}})
     emit({"event": "step_update", "step_update": {"conversation_id": "fake", "step_index": 2, "state": "DONE", "step_type": "tool", "tool_name": "run_command", "tool_info": {"parameters": {"command": "echo hi"}, "error": {"type": "TOOL_ERROR", "message": "context canceled"}}}})
+
+if error_event == "1":
+    emit({"event": "error", "error": {"type": "FATAL", "message": "fake fatal error"}})
+    sys.exit(0)
 
 if no_result != "1":
     result = {"conversation_id": "fake", "status": status, "response": response, "duration_seconds": 0, "num_turns": 1, "usage": {}}
@@ -222,6 +239,9 @@ const shape = process.argv[4] || "";
 const delay = process.argv[5] || "";
 const toolEvent = process.argv[6] === "1";
 const noResult = process.argv[7] === "1";
+const garbageLine = process.argv[8] === "1";
+const thoughtStep = process.argv[9] === "1";
+const errorEvent = process.argv[10] === "1";
 
 function emit(obj) {
     process.stdout.write(JSON.stringify(obj));
@@ -231,6 +251,10 @@ function emit(obj) {
 function main() {
     emit({event: "init", conversation_id: "fake", init: {}});
     emit({event: "step_update", step_update: {conversation_id: "fake", step_index: 0, state: "DONE", step_type: "user_input"}});
+    if (garbageLine) { process.stdout.write("not json and no event field\n"); }
+    if (thoughtStep) {
+        emit({event: "step_update", step_update: {conversation_id: "fake", step_index: 1, state: "ACTIVE", step_type: "thought"}});
+    }
     finish();
 }
 
@@ -255,6 +279,10 @@ function afterDeltas() {
         emit({event: "step_update", step_update: {conversation_id: "fake", step_index: 2, state: "ACTIVE", step_type: "tool", tool_name: "run_command", tool_info: {parameters: {command: "echo hi"}}}});
         emit({event: "step_update", step_update: {conversation_id: "fake", step_index: 2, state: "DONE", step_type: "tool", tool_name: "run_command", tool_info: {parameters: {command: "echo hi"}, error: {type: "TOOL_ERROR", message: "context canceled"}}}});
     }
+    if (errorEvent) {
+        emit({event: "error", error: {type: "FATAL", message: "fake fatal error"}});
+        return;
+    }
     if (!noResult) {
         const result = {conversation_id: "fake", status, response, duration_seconds: 0, num_turns: 1, usage: {}};
         if (deniedRaw) {
@@ -271,7 +299,7 @@ function afterDeltas() {
 }
 
 main();
-' "$response_file" "${FAKE_AGY_STATUS:-SUCCESS}" "${FAKE_AGY_DENIED:-}" "${FAKE_AGY_DENIED_SHAPE:-}" "$delay" "$tool_event" "$no_result"
+' "$response_file" "${FAKE_AGY_STATUS:-SUCCESS}" "${FAKE_AGY_DENIED:-}" "${FAKE_AGY_DENIED_SHAPE:-}" "$delay" "$tool_event" "$no_result" "$garbage_line" "$thought_step" "$error_event"
             ;;
         *)
             # jq/no-parser: emit a minimal non-streaming fallback so plain-text tests still see output.
