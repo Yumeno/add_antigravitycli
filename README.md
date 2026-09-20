@@ -20,7 +20,7 @@ Claude CodeまたはCodexからAntigravity CLIへ質問、レビュー、実装�
 
 - Antigravity CLI（`agy`）1.1.9 以降がインストール・認証済みであること（1.1.1 で `--print` の仕様が変わり、1.1.9 で print mode のスラッシュコマンド/スキル展開と `--disable-slash-commands` が追加された。wrapper は同フラグを常時付加するため、それ以前のバージョンは非対応。動作確認は 1.2.7）
 - Windows PowerShell 5.1+、またはbash
-- 実装委任では対象がGitリポジトリで、開始時点のworktreeがcleanであること
+- 実装委任では対象がGitリポジトリで、開始時点のworktreeがcleanであること（同一セッションの再委任は helper の `-Session` / `--session` で継続可能）
 
 ## 構成と互換性
 
@@ -113,7 +113,7 @@ Claude Codeでは `/ask-antigravity ...` のように呼び出します。
 - mediaは元ファイルを直接workspaceへ公開せず、wrapper所有の一時workspaceへcopyします。順序、元ファイル名、MIME、byte数をmanifest化します。
 - ディレクトリ、symlink / reparse point、認識できない形式を拒否します。未検証形式を暗黙変換しません。
 - helperの失敗sentinelとLLM回答を区別します。wrapper は `agy --output-format json` の結果を解析し、headless で自動拒否された tool 権限(`denied_actions`)を `[ANTIGRAVITY_DENIED_ACTIONS]` 行で常に可視化します。応答が空で拒否がある場合は `[ANTIGRAVITY_WRAPPER_ERROR]` で失敗します。
-- 実装委任前にclean treeとsnapshotを確認し、実行後はGit diffとテストを呼び出し元が独立検収します。
+- 実装委任前にclean treeとsnapshotを確認し、実行後はGit diffとテストを呼び出し元が独立検収します。agy 1.2.7 の非対話実行では agent がシェルコマンドを実行できないため、テストは呼び出し元が実行し、失敗ログを添えて同じセッションで再委任します（helper はセッションが記録した差分以外の変更があれば停止します）。
 - 実装委任時の共通制約は `scripts/antigravity-implement-safety.txt` で管理します。
 - Windows の `.cmd` / `.bat` dispatch では、`WorkDir` などの引数にcmd.exe特殊文字を含めないでください。該当する入力はfail-closedで拒否します。
 - commit、push、PR作成、既存変更の破棄、権限拡大は自動実行しません。
