@@ -26,7 +26,7 @@ Claude CodeまたはCodexからAntigravity CLIへ質問、レビュー、実装�
 
 - `.agents/skills/`: Codex CLI と Antigravity CLI(`agy`) が読む正本。Agent Skills標準に合わせ、frontmatterは `name` と `description` のみ。
 - `.claude/skills/`: Claude Code向け配布コピー。手動起動を保証するため `disable-model-invocation: true` と最小限の `allowed-tools` を追加。
-- `scripts/`: 開発用正本。CLI呼び出し、実装、検収を担うクロスプラットフォームhelper。
+- `scripts/`: 開発用正本。CLI呼び出し、実装、検収、画像生成物の取り込み(`antigravity-artifact`)を担うクロスプラットフォームhelper。
 - `*/skills/<skill>/scripts/`: 配布用コピー。各Skillは必要なhelperを同梱し、共通 `$HOME/scripts` を前提にしません。
 
 両ディレクトリの手順は同じ動作を意図しますが、frontmatterは機械的に同一化しません。機能変更時は `.agents` を先に更新し、Claude Code固有メタデータを保ったまま `.claude` へ同期してください。

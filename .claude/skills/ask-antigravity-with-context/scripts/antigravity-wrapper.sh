@@ -289,7 +289,8 @@ fi
 # Parse the single JSON object on stdout: write `response` to RESPONSE_FILE verbatim (bytes preserved,
 # may be multi-line/empty), and print `status` then the formatted denied-actions list as two lines on
 # stdout (this call's stdout, not the wrapper's). A third line `__SCHEMA_ERROR__` signals a
-# denied_actions value that is neither an array, a single object, nor null/absent.
+# denied_actions value that is neither an array, a single object, nor null/absent. A fourth line
+# carries `conversation_id` verbatim (empty if absent/null).
 RESPONSE_FILE="$(mktemp "${TMPDIR:-/tmp}/antigravity_response.XXXXXX")" || die 1 'Unable to create temporary response file.'
 
 # jq cannot strip a UTF-8 BOM itself; feed it a BOM-stripped copy when present.
@@ -305,19 +306,20 @@ case "$JSON_TOOL" in
     jq)
         HEADER="$(jq -r '
             (.status // "" | if type == "string" then . else (tostring) end) as $status
+            | (.conversation_id // "" | if type == "string" then . else (tostring) end) as $convid
             | (.denied_actions) as $raw
             | (if ($raw == null) then []
                elif ($raw | type) == "array" then $raw
                elif ($raw | type) == "object" then [$raw]
                else "__SCHEMA_ERROR__" end) as $normalized
             | if $normalized == "__SCHEMA_ERROR__" then
-                ($status, "", "__SCHEMA_ERROR__")
+                ($status, "", "__SCHEMA_ERROR__", $convid)
               else
                 ($normalized
                  | map("\(.action // "") (\(.display_name // ""))")
                  | reduce .[] as $x ([]; if any(.[]; . == $x) then . else . + [$x] end)
                  | join(", ")) as $denied
-                | ($status, $denied)
+                | ($status, $denied, "", $convid)
               end
         ' "$JQ_INPUT_FILE" 2>/dev/null)" || PARSE_OK=0
         # The response is piped through base64 before leaving jq: some platforms' jq/CRT
@@ -349,6 +351,7 @@ with open(sys.argv[1], encoding="utf-8-sig") as f:
     data = json.load(f)
 status = to_str(data.get("status", ""))
 response = to_str(data.get("response", ""))
+conversation_id = to_str(data.get("conversation_id"))
 denied_raw = data.get("denied_actions")
 if denied_raw is None:
     denied = []
@@ -357,7 +360,7 @@ elif isinstance(denied_raw, dict):
 elif isinstance(denied_raw, list):
     denied = denied_raw
 else:
-    sys.stdout.write(status + "\n\n__SCHEMA_ERROR__\n")
+    sys.stdout.write(status + "\n\n__SCHEMA_ERROR__\n" + conversation_id + "\n")
     with open(sys.argv[2], "wb") as rf:
         rf.write(response.encode("utf-8"))
     sys.exit(0)
@@ -369,7 +372,7 @@ for d in denied:
 denied_text = ", ".join(seen)
 with open(sys.argv[2], "wb") as rf:
     rf.write(response.encode("utf-8"))
-sys.stdout.write(status + "\n" + denied_text + "\n")
+sys.stdout.write(status + "\n" + denied_text + "\n\n" + conversation_id + "\n")
 PYEOF
 )" || PARSE_OK=0
         ;;
@@ -382,6 +385,7 @@ const data = JSON.parse(raw);
 const toStr = (v) => (v === null || v === undefined) ? "" : (typeof v === "string" ? v : String(v));
 const status = toStr(data.status);
 const response = toStr(data.response);
+const conversationId = toStr(data.conversation_id);
 const deniedRaw = data.denied_actions;
 let denied;
 if (deniedRaw === null || deniedRaw === undefined) {
@@ -392,7 +396,7 @@ if (deniedRaw === null || deniedRaw === undefined) {
     denied = [deniedRaw];
 } else {
     fs.writeFileSync(process.argv[2], response, "utf-8");
-    process.stdout.write(status + "\n\n__SCHEMA_ERROR__\n");
+    process.stdout.write(status + "\n\n__SCHEMA_ERROR__\n" + conversationId + "\n");
     process.exit(0);
 }
 const seen = [];
@@ -402,7 +406,7 @@ for (const d of denied) {
 }
 const deniedText = seen.join(", ");
 fs.writeFileSync(process.argv[2], response, "utf-8");
-process.stdout.write(status + "\n" + deniedText + "\n");
+process.stdout.write(status + "\n" + deniedText + "\n\n" + conversationId + "\n");
 ' "$OUT_FILE" "$RESPONSE_FILE" 2>/dev/null)" || PARSE_OK=0
         ;;
 esac
@@ -412,6 +416,7 @@ esac
 STATUS_LINE="$(printf '%s\n' "$HEADER" | sed -n '1p')"
 DENIED_TEXT="$(printf '%s\n' "$HEADER" | sed -n '2p')"
 SCHEMA_FLAG="$(printf '%s\n' "$HEADER" | sed -n '3p')"
+CONVERSATION_ID_LINE="$(printf '%s\n' "$HEADER" | sed -n '4p')"
 
 if [[ "$PARSE_OK" -ne 1 || -z "$STATUS_LINE" ]]; then
     RAW="$(head -c 500 "$OUT_FILE")"
@@ -419,6 +424,10 @@ if [[ "$PARSE_OK" -ne 1 || -z "$STATUS_LINE" ]]; then
     stderr_tail
     printf 'Error: agy returned unparseable output.\n' >&2
     exit 1
+fi
+
+if [[ -n "$CONVERSATION_ID_LINE" ]]; then
+    printf 'ANTIGRAVITY: conversation_id=%s\n' "$CONVERSATION_ID_LINE" >&2
 fi
 
 if [[ "$SCHEMA_FLAG" == "__SCHEMA_ERROR__" ]]; then

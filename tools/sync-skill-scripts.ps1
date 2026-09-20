@@ -22,7 +22,9 @@ $ImplementScripts = @(
     "antigravity-implement.sh",
     "antigravity-verify.ps1",
     "antigravity-verify.sh",
-    "antigravity-implement-safety.txt"
+    "antigravity-implement-safety.txt",
+    "antigravity-artifact.ps1",
+    "antigravity-artifact.sh"
 )
 
 function Get-ExpectedScripts([string]$SkillName) {

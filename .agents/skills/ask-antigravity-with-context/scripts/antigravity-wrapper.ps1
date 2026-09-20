@@ -286,6 +286,10 @@ try {
     }
     $deniedText = $deniedList -join ", "
     if ($deniedList.Count) { [Console]::Error.WriteLine("ANTIGRAVITY: denied_actions=$deniedText") }
+    if ($obj.ContainsKey('conversation_id') -and $null -ne $obj['conversation_id']) {
+        $conversationId = [string]$obj['conversation_id']
+        if ($conversationId) { [Console]::Error.WriteLine("ANTIGRAVITY: conversation_id=$conversationId") }
+    }
     if ($status -eq "TIMEOUT") {
         $extra = ""
         if ($deniedList.Count) { $extra += "`n[ANTIGRAVITY_DENIED_ACTIONS] $deniedText" }
