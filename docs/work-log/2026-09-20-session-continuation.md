@@ -43,7 +43,7 @@ Issue [#17](https://github.com/Yumeno/add_antigravitycli/issues/17) PR-A。agy 1
 ## レビュー Round 2
 
 - agy(仕様): NO MAJOR FINDINGS / CONVERGED。Nit 2(テスト不要タスクでは目視手順か `None` と書く、セッションパス例に Linux / macOS 表記を併記)→ 反映
-- Codex gpt-5.6-terra(コード): Major 3(sh の `dedup_sorted` が改行入りパスを壊す、sh が未知フィールドを拒否しない、ps1 が親より上位の junction を解決できない)→ NUL 安全なソート、許可キー限定の schema、Win32 `GetFinalPathNameByHandle` による実体パス解決で修正(Round 3 で再確認)
+- Codex gpt-5.6-terra(コード): Major 3(sh の `dedup_sorted` が改行入りパスを壊す、sh が未知フィールドを拒否しない、ps1 が親より上位の junction を解決できない)→ NUL 安全なソート、許可キー限定の schema、Win32 `GetFinalPathNameByHandle` による実体パス解決で修正 → Round 3 で NO MAJOR FINDINGS / CONVERGED
 
 ## 変更内容
 
@@ -56,7 +56,7 @@ Issue [#17](https://github.com/Yumeno/add_antigravitycli/issues/17) PR-A。agy 1
 
 ## 検証
 
-- unit: test-implement.sh / test-implement.ps1(セッション系を含む全件)、test-verify 両版、test-wrapper 両版、test-skill-bundles、sync -Check
+- unit: test-implement.sh 26/26(symlink・改行ファイル名は Windows で PASS-skip)、test-implement.ps1 OK、test-verify 両版、test-wrapper 両版(27/27、24/24)、test-skill-bundles OK、sync -Check 同期済み
 - 実 agy 1.2.7 E2E(temp リポジトリ、PowerShell 版、2 round):
   - round 1: `divide()` とテストを書かせる → 変更ファイル、静的確認、`### Verification Plan`(`pytest test_calc.py`、`3 passed`)を報告。verify OK、`[ANTIGRAVITY_SESSION] round=1 owned=2`
   - host: 差分を読み `python -m pytest -q` → 3 passed
