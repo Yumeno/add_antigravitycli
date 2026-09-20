@@ -1,4 +1,13 @@
 ﻿$ErrorActionPreference="Continue"
+# Remove-Item on a directory junction can hang on PS 5.1 when the junction's
+# target contains a .git directory (it appears to traverse into the target
+# rather than just unlinking the reparse point); Directory.Delete($p, $false)
+# removes only the link itself and is safe regardless of target contents.
+function Remove-Junction([string]$Path) {
+    if (Test-Path -LiteralPath $Path) {
+        try { [IO.Directory]::Delete($Path, $false) } catch { }
+    }
+}
 $Script=Join-Path (Split-Path $PSScriptRoot -Parent) "antigravity-implement.ps1"
 $Root=Join-Path $env:TEMP ("antigravity_impl_test_"+[guid]::NewGuid().ToString("N"))
 $Repo=Join-Path $Root repo; $Spec=Join-Path $Root spec.txt; $oldPath=$env:PATH
@@ -208,7 +217,10 @@ try {
     if($LASTEXITCODE-ne 0-or(Test-Path "$Session8.lock")){throw "session_lock_present: expected success after unlock`n$($o|Out-String)"}
     Remove-Item $Session8,"$Session8.snapshot" -Force -ErrorAction SilentlyContinue
 
-    # session_symlink_path_rejected: a directory junction as the session's parent must be rejected.
+    # session_symlink_path_rejected: a directory junction whose real target is
+    # legitimately outside the repo must now be ACCEPTED (the real-path
+    # resolver correctly classifies it as outside-repo), while a junction
+    # ancestor resolving INTO the repo is covered separately below.
     $JuncParent=Join-Path $Root "junc_target"
     $JuncLink=Join-Path $Root "junc_link"
     New-Item -ItemType Directory -Path $JuncParent -Force | Out-Null
@@ -217,12 +229,53 @@ try {
     if ($juncOk) {
         $Session9=Join-Path $JuncLink "s.json"
         $o=& powershell -NoProfile -ExecutionPolicy Bypass -File $Script -SpecFile $Spec -Repo $Repo -Session $Session9 2>&1
-        if($LASTEXITCODE-eq 0){throw "session_symlink_path_rejected: expected rejection`n$($o|Out-String)"}
+        $text=($o|Out-String)
+        if($LASTEXITCODE-ne 0){throw "session_symlink_path_rejected: expected acceptance of an outside-repo junction`n$text"}
+        Remove-Item $Session9,"$Session9.snapshot" -Force -ErrorAction SilentlyContinue
     } else {
         Write-Host "PASS-skip: junction creation not permitted on this platform"
     }
-    Remove-Item $JuncLink -Force -ErrorAction SilentlyContinue
+    Remove-Junction $JuncLink
     Remove-Item $JuncParent -Recurse -Force -ErrorAction SilentlyContinue
+
+    # session_ancestor_junction_rejected: a junction ANCESTOR (not the immediate
+    # parent) that points INTO the repo must still be caught by the real-path
+    # resolver, even though "sub" between the junction and the leaf is itself
+    # an ordinary directory (created inside the repo so it exists through the link).
+    $AncLink=Join-Path $Root "anc_link"
+    New-Item -ItemType Directory -Path (Join-Path $Repo "sub") -Force | Out-Null
+    $ancJuncOk=$true
+    try { New-Item -ItemType Junction -Path $AncLink -Target $Repo -ErrorAction Stop | Out-Null } catch { $ancJuncOk=$false }
+    if ($ancJuncOk) {
+        $Session11=Join-Path $AncLink "sub\s.json"
+        $o=& powershell -NoProfile -ExecutionPolicy Bypass -File $Script -SpecFile $Spec -Repo $Repo -Session $Session11 2>&1
+        $text=($o|Out-String)
+        if($LASTEXITCODE-eq 0-or$text-notmatch'outside the repository'){throw "session_ancestor_junction_rejected: expected rejection`n$text"}
+    } else {
+        Write-Host "PASS-skip: ancestor junction creation not permitted on this platform"
+    }
+    Remove-Junction $AncLink
+    Remove-Item (Join-Path $Repo "sub") -Recurse -Force -ErrorAction SilentlyContinue
+
+    # session_ancestor_junction_outside_accepted: a junction ancestor pointing
+    # OUTSIDE the repo must resolve fine and let the session start normally.
+    $OutsideTarget=Join-Path $Root "outside_target"
+    $OutsideLink=Join-Path $Root "outside_link"
+    New-Item -ItemType Directory -Path $OutsideTarget -Force | Out-Null
+    $outJuncOk=$true
+    try { New-Item -ItemType Junction -Path $OutsideLink -Target $OutsideTarget -ErrorAction Stop | Out-Null } catch { $outJuncOk=$false }
+    if ($outJuncOk) {
+        $Session12=Join-Path $OutsideLink "sub\s.json"
+        New-Item -ItemType Directory -Path (Join-Path $OutsideTarget "sub") -Force | Out-Null
+        $o=& powershell -NoProfile -ExecutionPolicy Bypass -File $Script -SpecFile $Spec -Repo $Repo -Session $Session12 2>&1
+        $text=($o|Out-String)
+        if($LASTEXITCODE-ne 0){throw "session_ancestor_junction_outside_accepted: expected success`n$text"}
+        Remove-Item (Join-Path $OutsideTarget "sub\s.json"),(Join-Path $OutsideTarget "sub\s.json.snapshot") -Force -ErrorAction SilentlyContinue
+    } else {
+        Write-Host "PASS-skip: outside ancestor junction creation not permitted on this platform"
+    }
+    Remove-Junction $OutsideLink
+    Remove-Item $OutsideTarget -Recurse -Force -ErrorAction SilentlyContinue
 
     # session_verify_failure_precedence: verify violation (protected file) wins over wrapper failure -> exit 3.
     $Session10=Join-Path $Root "session_precedence.json"

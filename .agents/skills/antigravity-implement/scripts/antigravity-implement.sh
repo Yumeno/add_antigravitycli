@@ -138,19 +138,22 @@ dirty_paths() {
 }
 
 # Deduplicate an array of NUL-safe strings, output via nameref (sorted, unique).
+# Sorting goes through NUL-delimited streams end to end: a path containing a
+# newline must never be split by a '\n'-delimited sort/mapfile round trip.
 dedup_sorted() {
     local -n _src="$1" _dst="$2"
     local -A seen=()
-    local sorted=()
+    local uniq=()
     local p
     for p in "${_src[@]}"; do
         [[ -n "$p" ]] || continue
         [[ -z "${seen[$p]+x}" ]] || continue
         seen[$p]=1
-        sorted+=("$p")
+        uniq+=("$p")
     done
-    if [[ ${#sorted[@]} -gt 0 ]]; then
-        mapfile -t sorted < <(printf '%s\n' "${sorted[@]}" | sort)
+    local sorted=()
+    if [[ ${#uniq[@]} -gt 0 ]]; then
+        mapfile -d '' -t sorted < <(printf '%s\0' "${uniq[@]}" | sort -z)
     fi
     _dst=("${sorted[@]}")
 }
@@ -173,6 +176,25 @@ read_session_owned() {
         dec="$(b64d "$enc")" || die 'Session file is invalid: unreadable owned entry.'
         _out+=("$dec")
     done < <(awk -F= '$1=="owned"{print substr($0, length($1)+2)}' "$_sfile")
+}
+
+validate_session_schema() {
+    # $1=file ; reject any line that is not a recognized "key=value" field.
+    # Fails closed: an unrecognized key or a line without '=' invalidates the
+    # whole file, so a future/foreign field can never be silently ignored.
+    local sfile="$1" line key
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ -n "$line" ]] || continue
+        case "$line" in
+            *=*) ;;
+            *) die "Session file is invalid: malformed line: $line" ;;
+        esac
+        key="${line%%=*}"
+        case "$key" in
+            version|repo|snapshot|round|owned) ;;
+            *) die "Session file is invalid: unknown field $key" ;;
+        esac
+    done <"$sfile"
 }
 
 validate_owned_path() {
@@ -220,6 +242,7 @@ SNAP=''
 if [[ -n "$SESSION_PATH" && -f "$SESSION_PATH" ]]; then
     IS_CONTINUATION=1
     # --- strict session integrity validation ---
+    validate_session_schema "$SESSION_PATH"
     for field in version repo snapshot round; do
         cnt="$(count_session_field "$SESSION_PATH" "$field")"
         [[ "$cnt" -eq 1 ]] || die "Session file is invalid: duplicated or missing '$field' field."

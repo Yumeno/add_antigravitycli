@@ -37,7 +37,7 @@ wrapperはAntigravity CLIのboolean `--sandbox` を常に有効化する。sandb
 
 agentはテストを実行できないので、「委任 → 呼び出し元が検収・テスト → 失敗ログを添えて再委任」を呼び出し元が回す。helperは同一セッションの差分だけを許容する継続委任を提供する。
 
-1. 1回目はセッションファイルのパス（リポジトリ外、例: `%TEMP%/agy-session-<id>.json`）を `-Session` / `--session` で渡して実行する。helperはclean treeを要求し、snapshotをセッションと一緒に保存する。
+1. 1回目はセッションファイルのパス（リポジトリ外、例: Windows は `%TEMP%/agy-session-<id>.json`、Linux / macOS は `${TMPDIR:-/tmp}/agy-session-<id>`）を `-Session` / `--session` で渡して実行する。helperはclean treeを要求し、snapshotをセッションと一緒に保存する。
 2. helperの出力末尾の `[ANTIGRAVITY_SESSION] round=N owned=<数>` を確認し、`### Verification Plan` に書かれたテストを参考に、**差分を自分で読んでから**実行するテストを自分で選んで実行する。agentが提案したコマンドを無条件に実行しない。
 3. 失敗したら、失敗ログの要点と「この失敗だけを直す」旨を書いた新しい仕様ファイルを作り、同じ `-Session` で再実行する。含めるもの: 実行したコマンドと終了コード、失敗したテスト名、例外型・ファイル名・行番号、期待値と実際値、呼び出し元が追加した受け入れテストならそのコード抜粋、修正を許可するファイル。含めないもの: 成功したテストのログ、ライブラリ内部のスタックトレース、ANSI 制御文字、新しい要件。helperはworking treeの変更がセッションの記録した範囲内であることを確認し、範囲外の変更があれば一覧を出して停止する。
    - 自分のテスト実行が生んだ副産物（`__pycache__`、キャッシュ、ビルド成果物）が原因なら、可能な限り生成を避け（例: `PYTHONDONTWRITEBYTECODE=1 pytest -p no:cacheprovider`、`python -B -m pytest`。`-p no:cacheprovider` だけでは `__pycache__` は防げない）、残るものは一覧を確認したうえで `-AdoptChanges` / `--adopt-changes` を付けて再実行し、セッションに取り込む。

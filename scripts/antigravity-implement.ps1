@@ -28,6 +28,56 @@ $root = (Resolve-Path -LiteralPath ($root | Select-Object -First 1)).Path
 $verify = Join-Path $PSScriptRoot "antigravity-verify.ps1"
 $wrapper = Join-Path $PSScriptRoot "antigravity-wrapper.ps1"
 
+# Win32 real-path resolver: Resolve-Path/GetFullPath never resolve reparse
+# points (symlinks/junctions), and .Target on Get-Item only shows the
+# *immediate* link target, not a chain through further ancestor junctions.
+# CreateFileW + GetFinalPathNameByHandleW ask the filesystem for the true
+# underlying path, resolving every hop in one call -- this is the only
+# reliable way to defeat an ancestor junction planted anywhere above a path.
+Add-Type -Namespace AntigravityWin32 -Name NativeMethods -MemberDefinition @'
+[DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+public static extern IntPtr CreateFileW(
+    string lpFileName, uint dwDesiredAccess, uint dwShareMode,
+    IntPtr lpSecurityAttributes, uint dwCreationDisposition,
+    uint dwFlagsAndAttributes, IntPtr hTemplateFile);
+
+[DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+public static extern uint GetFinalPathNameByHandleW(
+    IntPtr hFile, System.Text.StringBuilder lpszFilePath, uint cchFilePath, uint dwFlags);
+
+[DllImport("kernel32.dll", SetLastError = true)]
+public static extern bool CloseHandle(IntPtr hObject);
+'@
+
+# Resolves $Path (which must exist as a directory) to its canonical, fully
+# reparse-point-resolved absolute path. Throws (via Fail) if the OS cannot
+# open or resolve it.
+function Get-Win32RealPath([string]$Path) {
+    $INVALID_HANDLE = [IntPtr]::new(-1)
+    $FILE_SHARE_READ = 0x00000001
+    $FILE_SHARE_WRITE = 0x00000002
+    $FILE_SHARE_DELETE = 0x00000004
+    $OPEN_EXISTING = 3
+    $FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
+    $handle = [AntigravityWin32.NativeMethods]::CreateFileW(
+        $Path, 0, ($FILE_SHARE_READ -bor $FILE_SHARE_WRITE -bor $FILE_SHARE_DELETE),
+        [IntPtr]::Zero, $OPEN_EXISTING, $FILE_FLAG_BACKUP_SEMANTICS, [IntPtr]::Zero)
+    if ($handle -eq $INVALID_HANDLE) { Fail 1 "Could not open path to resolve its real location: $Path" }
+    try {
+        $sb = New-Object Text.StringBuilder 32768
+        $len = [AntigravityWin32.NativeMethods]::GetFinalPathNameByHandleW($handle, $sb, $sb.Capacity, 0)
+        if ($len -eq 0 -or $len -ge $sb.Capacity) { Fail 1 "Could not resolve the real path of: $Path" }
+        $resolved = $sb.ToString(0, [int]$len)
+    } finally {
+        [void][AntigravityWin32.NativeMethods]::CloseHandle($handle)
+    }
+    if ($resolved.StartsWith('\\?\UNC\')) { $resolved = '\\' + $resolved.Substring(8) }
+    elseif ($resolved.StartsWith('\\?\')) { $resolved = $resolved.Substring(4) }
+    return $resolved
+}
+
+$root = Get-Win32RealPath $root
+
 # Display-only: join a list with commas, replacing embedded newlines with the
 # literal text "\n" so a single log line cannot be split by a crafted filename.
 # Never feed this back into comparison logic -- arrays/sets are the source of truth.
@@ -35,37 +85,15 @@ function Join-Display([string[]]$Items) {
     return (($Items | ForEach-Object { $_ -replace "`r?`n", '\n' }) -join ',')
 }
 
-# Resolve a directory to its real path, following reparse points (symlinks /
-# junctions) up to 8 hops. Get-Item -LiteralPath alone does not do this for
-# junctions on PS 5.1, so walk .Target manually.
-function Resolve-RealDirectory([string]$Path) {
-    $current = [IO.Path]::GetFullPath($Path)
-    for ($hop = 0; $hop -lt 8; $hop++) {
-        $item = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
-        if (-not $item) { return $current }
-        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-            $target = [string]$item.Target
-            if (-not $target) { Fail 1 "Session path parent is a link that could not be resolved: $current" }
-            if (-not [IO.Path]::IsPathRooted($target)) { $target = Join-Path (Split-Path -Parent $current) $target }
-            $current = [IO.Path]::GetFullPath($target)
-            continue
-        }
-        return $current
-    }
-    Fail 1 "Session path parent has too many reparse-point hops: $Path"
-}
-
 function Get-SessionPath([string]$Path) {
     $full = [IO.Path]::GetFullPath($Path)
     $parent = Split-Path -Parent $full
     if (-not (Test-Path -LiteralPath $parent -PathType Container)) { Fail 1 "Session directory not found: $parent" }
-    $realParent = Resolve-RealDirectory $parent
-    # A reparse-point parent (junction) is rejected outright: it could redirect
-    # writes outside the intended location even after GetFullPath normalization.
-    $parentItem = Get-Item -LiteralPath $parent -Force
-    if (($parentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-        Fail 1 "Session directory must not be a reparse point: $parent"
-    }
+    # Resolve the parent through the real Win32 API: this follows every
+    # reparse-point hop in the chain (not just the immediate parent), so an
+    # ancestor junction anywhere above the session path cannot smuggle it
+    # inside the repository.
+    $realParent = Get-Win32RealPath $parent
     $full = Join-Path $realParent (Split-Path -Leaf $full)
     if ($full.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) -or ($full -ieq $root)) {
         Fail 1 "Session file must be outside the repository: $Path"

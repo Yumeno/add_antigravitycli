@@ -40,6 +40,11 @@ Issue [#17](https://github.com/Yumeno/add_antigravitycli/issues/17) PR-A。agy 1
 - Nit: Verification Plan は agent の候補であり実行可能性を断定しない文言に
 - 反映: 上記すべて。dirty / owned / outside は NUL ストリームと配列で保持し表示用にだけ結合、セッションパスの実体解決と link 拒否・排他作成、schema 検証(sidecar 固定、`round` 正整数、`owned` は `..` なし相対パス、未知・重複フィールド拒否、sidecar の repo 照合)、`<session>.lock` の排他作成(自動回復なし)、優先順位「session 更新失敗(exit 4)→ verify 失敗 → wrapper 失敗」、rename・空白/非 ASCII・git 失敗・改竄・lock・link・優先順位のテスト
 
+## レビュー Round 2
+
+- agy(仕様): NO MAJOR FINDINGS / CONVERGED。Nit 2(テスト不要タスクでは目視手順か `None` と書く、セッションパス例に Linux / macOS 表記を併記)→ 反映
+- Codex gpt-5.6-terra(コード): Major 3(sh の `dedup_sorted` が改行入りパスを壊す、sh が未知フィールドを拒否しない、ps1 が親より上位の junction を解決できない)→ NUL 安全なソート、許可キー限定の schema、Win32 `GetFinalPathNameByHandle` による実体パス解決で修正(Round 3 で再確認)
+
 ## 変更内容
 
 - `scripts/antigravity-implement.{ps1,sh}`: `-Session` / `-CloseSession` / `-AdoptChanges`(sh は `--session` / `--close-session` / `--adopt-changes`)。`-SpecFile` は `-CloseSession` 時のみ省略可。dirty set は `git status --porcelain=v1 --untracked-files=all -z` で取得し rename の 2 パスを両方含める。セッションファイルは ps1 が JSON、sh が key=value(パスは base64)で実装別

@@ -226,6 +226,62 @@ case_session_symlink_path_rejected() {
     [[ $code -ne 0 && "$output" == *'must not be a link'* ]]
 }
 
+case_session_newline_path() {
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*)
+            printf 'PASS-skip: filenames with newlines cannot be created on this platform\n' >&2
+            return 0
+            ;;
+    esac
+    new_repo; rm -f "$SESSION" "$SESSION.snapshot"
+    local newline_name=$'weird\nname.txt'
+    export FAKE_AGY_WRITE_FILE="$ROOT/$newline_name"
+    output="$(PATH="$SHIM:$PATH" bash "$IMPLEMENT" --spec-file "$SPEC" --repo "$ROOT" --timeout 5 --session "$SESSION" 2>/dev/null)"
+    code=$?
+    unset FAKE_AGY_WRITE_FILE
+    [[ $code -eq 0 && -f "$ROOT/$newline_name" ]] || return 1
+    # A second round with no further changes must accept the newline-named
+    # file as already owned rather than reporting it as outside the session.
+    output="$(PATH="$SHIM:$PATH" bash "$IMPLEMENT" --spec-file "$SPEC" --repo "$ROOT" --timeout 5 --session "$SESSION" 2>&1)"
+    code=$?
+    [[ $code -eq 0 && "$output" != *'outside this delegation session'* ]]
+}
+
+case_session_unknown_field_rejected() {
+    new_repo; rm -f "$SESSION" "$SESSION.snapshot"
+    output="$(PATH="$SHIM:$PATH" bash "$IMPLEMENT" --spec-file "$SPEC" --repo "$ROOT" --timeout 5 --session "$SESSION" 2>/dev/null)"
+    code=$?
+    [[ $code -eq 0 ]] || return 1
+    printf 'foo=bar\n' >>"$SESSION"
+    set +e; output="$(PATH="$SHIM:$PATH" bash "$IMPLEMENT" --spec-file "$SPEC" --repo "$ROOT" --session "$SESSION" 2>&1)"; code=$?; set -e
+    [[ $code -eq 1 && "$output" == *'Session file is invalid'* && "$output" == *'unknown field foo'* ]]
+}
+
+case_session_malformed_line_rejected() {
+    new_repo; rm -f "$SESSION" "$SESSION.snapshot"
+    output="$(PATH="$SHIM:$PATH" bash "$IMPLEMENT" --spec-file "$SPEC" --repo "$ROOT" --timeout 5 --session "$SESSION" 2>/dev/null)"
+    code=$?
+    [[ $code -eq 0 ]] || return 1
+    printf 'garbage\n' >>"$SESSION"
+    set +e; output="$(PATH="$SHIM:$PATH" bash "$IMPLEMENT" --spec-file "$SPEC" --repo "$ROOT" --session "$SESSION" 2>&1)"; code=$?; set -e
+    [[ $code -eq 1 && "$output" == *'Session file is invalid'* ]]
+}
+
+case_session_multiple_owned_lines_valid() {
+    new_repo; rm -f "$SESSION" "$SESSION.snapshot"
+    export FAKE_AGY_WRITE_FILE="$ROOT/new.txt"
+    output="$(PATH="$SHIM:$PATH" bash "$IMPLEMENT" --spec-file "$SPEC" --repo "$ROOT" --timeout 5 --session "$SESSION" 2>/dev/null)"
+    code=$?
+    unset FAKE_AGY_WRITE_FILE
+    [[ $code -eq 0 ]] || return 1
+    printf 'owned=%s\n' "$(b64e_test 'extra.txt')" >>"$SESSION"
+    # A session with multiple 'owned=' lines (now two) must still validate and
+    # run a further round successfully.
+    output="$(PATH="$SHIM:$PATH" bash "$IMPLEMENT" --spec-file "$SPEC" --repo "$ROOT" --timeout 5 --session "$SESSION" 2>&1)"
+    code=$?
+    [[ $code -eq 0 && "$output" != *'Session file is invalid'* ]]
+}
+
 case_session_verify_failure_precedence() {
     new_repo; rm -f "$SESSION" "$SESSION.snapshot"
     output="$(PATH="$SHIM:$PATH" bash "$IMPLEMENT" --spec-file "$SPEC" --repo "$ROOT" --timeout 5 --session "$SESSION" 2>/dev/null)"
@@ -263,6 +319,10 @@ testcase session_tampered_round case_session_tampered_round
 testcase session_tampered_owned_traversal case_session_tampered_owned_traversal
 testcase session_lock_blocks_and_releases case_session_lock_blocks_and_releases
 testcase session_symlink_path_rejected case_session_symlink_path_rejected
+testcase session_newline_path case_session_newline_path
+testcase session_unknown_field_rejected case_session_unknown_field_rejected
+testcase session_malformed_line_rejected case_session_malformed_line_rejected
+testcase session_multiple_owned_lines_valid case_session_multiple_owned_lines_valid
 testcase session_verify_failure_precedence case_session_verify_failure_precedence
 printf 'Passed: %d / %d\n' "$passed" "$total"
 [[ "$passed" -eq "$total" ]]
