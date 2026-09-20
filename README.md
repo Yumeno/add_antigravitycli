@@ -112,7 +112,7 @@ Claude Codeでは `/ask-antigravity ...` のように呼び出します。
 - コンテキストは依頼に必要な範囲だけを外部サービスへ送信します。
 - mediaは元ファイルを直接workspaceへ公開せず、wrapper所有の一時workspaceへcopyします。順序、元ファイル名、MIME、byte数をmanifest化します。
 - ディレクトリ、symlink / reparse point、認識できない形式を拒否します。未検証形式を暗黙変換しません。
-- helperの失敗sentinelとLLM回答を区別します。
+- helperの失敗sentinelとLLM回答を区別します。wrapper は `agy --output-format json` の結果を解析し、headless で自動拒否された tool 権限(`denied_actions`)を `[ANTIGRAVITY_DENIED_ACTIONS]` 行で常に可視化します。応答が空で拒否がある場合は `[ANTIGRAVITY_WRAPPER_ERROR]` で失敗します。
 - 実装委任前にclean treeとsnapshotを確認し、実行後はGit diffとテストを呼び出し元が独立検収します。
 - 実装委任時の共通制約は `scripts/antigravity-implement-safety.txt` で管理します。
 - Windows の `.cmd` / `.bat` dispatch では、`WorkDir` などの引数にcmd.exe特殊文字を含めないでください。該当する入力はfail-closedで拒否します。
@@ -164,6 +164,10 @@ Get-ChildItem scripts\tests\test-*.ps1 | ForEach-Object {
 `Please sign in...` と表示される場合は、wrapperやスキルの問題ではなくAntigravity CLIが未認証です。Antigravity CLIでサインインを完了してから再実行してください。認証を伴うE2Eを自動で繰り返さないでください。
 
 wrapper の応答が依頼と無関係に `--print-timeout` フラグの解説になる場合、bundle 内の wrapper が古い（`--print` を渡す旧版）状態です。installer を再実行して更新してください。
+
+`[ANTIGRAVITY_WRAPPER_ERROR] agy produced no response because tool permissions were denied in headless mode.` と `[ANTIGRAVITY_DENIED_ACTIONS] ...` が出る場合、agent がシェルコマンド等の承認を要する tool を使おうとし、非対話実行のため自動拒否されています(agy 1.2.7 + `--sandbox` では Windows 上のシェルコマンドが該当します)。レビュー・質問用途では「tool を使わずコンテキストだけで答える」旨を指示に含めてください。実装委任でテスト実行やファイル複製が必要な場合の扱いは issue #17 を参照してください。
+
+Bash 版 wrapper は JSON 解析に `jq`、`python3`、`python`、`node` のいずれかを使います。いずれも無い環境では従来の text 出力に戻り、拒否検知は無効になります(stderr に警告)。
 
 ## 運用方針
 

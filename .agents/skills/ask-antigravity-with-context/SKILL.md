@@ -37,7 +37,7 @@ bash "<解決したscripts>/antigravity-wrapper.sh" --prompt "レビューして
 bash "<解決したscripts>/antigravity-wrapper.sh" --prompt "順番に比較してください" --attachment "/path/first.png" --attachment "/path/second.wav" --attachment "/path/third.mp4"
 ```
 
-5. 失敗sentinelは回答と区別する。成功時はAntigravityの指摘と自身の検証結果を分けて提示する。
+5. 失敗sentinelは回答と区別する。`[ANTIGRAVITY_DENIED_ACTIONS]` 行が出た場合は、agentが承認の要るtool(シェルコマンド等)を使おうとして非対話実行のため自動拒否されたことを意味する。回答があっても「拒否された工程がある」と併記し、回答が空で失敗した場合は指示に「toolを使わずコンテキストだけで答える」を加えて再実行する。成功時はAntigravityの指摘と自身の検証結果を分けて提示する。
 6. 作成した一時ファイルだけを、絶対パスと対象範囲を確認して削除する。
 
 wrapperはAntigravity CLIのboolean `--sandbox` を常に有効化する。sandboxへmode値を渡そうとしない。
