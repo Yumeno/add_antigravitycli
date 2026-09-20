@@ -40,11 +40,11 @@ ASPECT_RATIO: <the AspectRatio value you passed>
 ```
 
 - 上記 1 件では agent は `ARTIFACT_PATH: C:\Users\<user>\.gemini\antigravity-cli\brain\<conversation-id>\<ImageName>_<ms>.jpg` の形で報告した [実測: 1.2.7、1 件]。複数枚や編集タスクでも同じ形で返るかは未検証 [推定]
-- **`antigravity-implement` の helper は wrapper 終了直後に antigravity-verify の check を走らせる**。agent はリポジトリ内に何も書かないので、この自動検収は「変更なし」で通り、生成物の検収にはならない。生成物の受け取りと実体確認は **helper 終了後に host が別途行う**(helper 側の対応は issue 化、5 節):
-  1. wrapper 出力から `ARTIFACT_PATH:` 行を取り出す。パスが `~/.gemini/antigravity-cli/brain/` 配下であることを確認してから扱う(それ以外のパスは agent の報告を信用せず停止)
-  2. host の通常のファイル操作でリポジトリ内へ複製し、必要なら PNG へ変換する(agy の権限とは無関係なので拒否されない [推定: host 側の通常操作。複製自体は本リポジトリでは未試験、Read での読み取りは実測済み])
-  3. 3 節の実体確認(magic bytes・寸法・バイト数・目視)を複製後のファイルに対して行う
-  4. `git status` で複製したファイルだけが untracked に現れることを確認する(agent 由来の変更が無いことは helper の自動検収で確認済み)
+- **`antigravity-implement` の helper は wrapper 終了直後に antigravity-verify の check を走らせる**。agent はリポジトリ内に何も書かないので、この自動検収は「変更なし」で通り、生成物の検収にはならない。生成物の受け取りは **helper 終了後に host が同梱の `antigravity-artifact` helper で行う**:
+  1. wrapper 出力から `ARTIFACT_PATH:` 行を取り出す(agent の報告なので信用せず、次の helper に検証させる)
+  2. `antigravity-artifact.ps1 import -Repo <repo> -Source <ARTIFACT_PATH> -Destination <repo 内のパス>`(bash は `antigravity-artifact.sh import --repo ... --source ... --destination ...`)を実行する。helper は、source の実体パスが `~/.gemini/antigravity-cli/brain/` 配下の通常ファイルであること(link は拒否)、magic bytes が PNG / JPEG であること、寸法が読めること、destination が repo 内で拡張子が内容と一致すること(変換はしない。JPEG は `.jpg` / `.jpeg`)、既存ファイルを `-Overwrite` なしで上書きしないこと、保護対象(`.git/`、`.env`、鍵)でないことを検査してから複製し、SHA-256 を照合して `[ANTIGRAVITY_ARTIFACT_OK] type=... width=... height=... bytes=... sha256=... source=... destination=...` を出す
+  3. PNG が必要なら import 後に host が変換する(helper は依存を増やさないため変換しない)
+  4. 3 節の目視を複製後のファイルに対して行い、`git status` で複製したファイルだけが untracked に現れることを確認する(agent 由来の変更が無いことは helper の自動検収で確認済み)
 - 1.1.1 時点の挙動(参考): 仕様書にリポジトリ内の絶対パスを書けば agent が sandbox + `--add-dir` 下で直接書き込めた [実測: 2026-07-10]。相対・曖昧な指定は scratch に落ちた。1.2.7 ではこの経路は headless では使えない
 
 ### 2.3 編集タスクの指示形
@@ -76,7 +76,7 @@ ASPECT_RATIO: <the AspectRatio value you passed>
 ## 3. 検収(antigravity-verify との関係)
 
 - 1.2.7 の推奨経路(2.2)では生成物は agent がリポジトリ外に置き、host が複製する。helper の snapshot 検収(antigravity-verify check)は wrapper 直後に完了しており、後から再実行するものではない。**host 側では複製後に `git status` で、複製したファイルだけが増えたことを確認する**。helper の検収は「期待値照合型」ではなく「差分検出型(snapshot 比較)」なので、agent がリポジトリ内に書いた場合も枚数・ファイル名が事前不明で機能する [実測: 1.1.1]。
-- 実体確認は **magic bytes**(PNG は先頭 8 バイト `89 50 4E 47 0D 0A 1A 0A`、JPEG は `FF D8 FF`)+ **寸法**(JPEG は SOF セグメント、PNG は IHDR から読む)+ **バイト数** + **目視**。
+- 実体確認は **magic bytes**(PNG は先頭 8 バイト `89 50 4E 47 0D 0A 1A 0A`、JPEG は `FF D8 FF`)+ **寸法**(JPEG は SOF セグメント、PNG は IHDR から読む)+ **バイト数** + **目視**。magic bytes・寸法・バイト数・SHA-256 は `antigravity-artifact import` が出力するので、host は目視と用途適合の判断に集中する。
   - 実測の正常生成は 1024〜1376px 級で約 400KB〜1MB。**数十 KB 未満なら placeholder を疑う**。
   - 寸法比がアスペクト比指定と一致することを確認する(16:9 指定 → 1376×768 など)。
   - 目視を省かない。応答の「生成しました」報告と画像の実内容は別物として扱う。
@@ -92,6 +92,6 @@ ASPECT_RATIO: <the AspectRatio value you passed>
 ## 5. 主要出典
 
 - 実測記録: `docs/work-log/2026-07-10-image-gen.md`(1.1.1)、`docs/work-log/2026-09-20-image-gen-spec.md`(1.2.7)(本リポジトリ)
-- helper への host 複製ステップ組み込みの検討: issue #17(本リポジトリ)
+- host 複製ステップの helper 化(`antigravity-artifact`): issue #17 PR-B(本リポジトリ)
 - 姉妹リポジトリの同種文書: [add_codexcli `docs/references/image-generation.md`](https://github.com/Yumeno/add_codexcli/blob/main/docs/references/image-generation.md)(GPT-Image-2 向け。数値は流用不可)
 - Antigravity CLI 公式: https://antigravity.google/docs/cli/overview(画像生成の公式仕様ページは調査時点で未発見)

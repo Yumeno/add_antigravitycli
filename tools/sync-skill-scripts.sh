@@ -23,6 +23,8 @@ implement_scripts=(
     antigravity-verify.ps1
     antigravity-verify.sh
     antigravity-implement-safety.txt
+    antigravity-artifact.ps1
+    antigravity-artifact.sh
 )
 
 expected_scripts() {
