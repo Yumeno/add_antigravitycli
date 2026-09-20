@@ -10,14 +10,25 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 CONFIG_FILE="${ANTIGRAVITY_WRAPPER_CONFIG:-$HOME/.agents/add_antigravitycli/antigravity-wrapper.conf}"
 MODEL_RE='^[A-Za-z0-9._:/-]+$'
 
+# A candidate must actually parse JSON: on Windows, `python3` may be a Store stub that is on PATH but unusable.
+json_tool_works() {
+    command -v "$1" >/dev/null 2>&1 || return 1
+    case "$1" in
+        jq) printf '{"a":1}' | jq -e '.a == 1' >/dev/null 2>&1 ;;
+        python3|python) "$1" -c 'import json,sys; sys.exit(0 if json.loads("{\"a\":1}")["a"] == 1 else 1)' >/dev/null 2>&1 ;;
+        node) node -e 'process.exit(JSON.parse("{\"a\":1}").a === 1 ? 0 : 1)' >/dev/null 2>&1 ;;
+        *) return 1 ;;
+    esac
+}
+
 json_tool() {
     if [[ "${ANTIGRAVITY_WRAPPER_JSON_TOOL:-}" == "none" ]]; then return 1; fi
     if [[ -n "${ANTIGRAVITY_WRAPPER_JSON_TOOL:-}" ]]; then
-        command -v "$ANTIGRAVITY_WRAPPER_JSON_TOOL" >/dev/null 2>&1 && { printf '%s' "$ANTIGRAVITY_WRAPPER_JSON_TOOL"; return 0; }
+        json_tool_works "$ANTIGRAVITY_WRAPPER_JSON_TOOL" && { printf '%s' "$ANTIGRAVITY_WRAPPER_JSON_TOOL"; return 0; }
         return 1
     fi
     for tool in jq python3 python node; do
-        command -v "$tool" >/dev/null 2>&1 && { printf '%s' "$tool"; return 0; }
+        json_tool_works "$tool" && { printf '%s' "$tool"; return 0; }
     done
     return 1
 }
@@ -144,10 +155,12 @@ MEDIA_LINES=''
 INPUT_FILE=''
 OUT_FILE=''
 ERR_FILE=''
+RESPONSE_FILE=''
 cleanup() {
     [[ -z "$INPUT_FILE" ]] || rm -f "$INPUT_FILE"
     [[ -z "$OUT_FILE" ]] || rm -f "$OUT_FILE"
     [[ -z "$ERR_FILE" ]] || rm -f "$ERR_FILE"
+    [[ -z "$RESPONSE_FILE" ]] || rm -f "$RESPONSE_FILE"
     [[ -z "$MEDIA_DIR" ]] || rm -rf -- "$MEDIA_DIR"
     [[ -z "$OWNED_WORKDIR" ]] || rm -rf -- "$OWNED_WORKDIR"
 }
@@ -259,44 +272,101 @@ if [[ "$AGY_EXIT" -ne 0 ]]; then
     printf '%s agy CLI exited with non-zero status: %s\n' "$ERROR_SENTINEL" "$AGY_EXIT"
     exit "$AGY_EXIT"
 fi
-[[ -s "$OUT_FILE" ]] || die 1 'agy CLI returned empty output.'
+
+stderr_tail() {
+    [[ -s "$ERR_FILE" ]] || return 0
+    printf 'agy stderr (tail):\n'
+    tail -n 5 "$ERR_FILE" | cut -c1-400
+}
+
+[[ -s "$OUT_FILE" ]] || { printf '%s agy CLI returned empty output.\n' "$ERROR_SENTINEL"; stderr_tail; printf 'Error: agy CLI returned empty output.\n' >&2; exit 1; }
 
 if [[ -z "$JSON_TOOL" ]]; then
     cat "$OUT_FILE"
     exit 0
 fi
 
-# Parse the single JSON object on stdout: write `response` to RESPONSE_FILE (may be multi-line/empty),
-# and print `status` then the formatted denied-actions list as two lines on stdout (this call's stdout,
-# not the wrapper's).
+# Parse the single JSON object on stdout: write `response` to RESPONSE_FILE verbatim (bytes preserved,
+# may be multi-line/empty), and print `status` then the formatted denied-actions list as two lines on
+# stdout (this call's stdout, not the wrapper's). A third line `__SCHEMA_ERROR__` signals a
+# denied_actions value that is neither an array, a single object, nor null/absent.
 RESPONSE_FILE="$(mktemp "${TMPDIR:-/tmp}/antigravity_response.XXXXXX")" || die 1 'Unable to create temporary response file.'
-trap 'rm -f "$RESPONSE_FILE"; cleanup' EXIT HUP INT TERM
+
+# jq cannot strip a UTF-8 BOM itself; feed it a BOM-stripped copy when present.
+JQ_INPUT_FILE="$OUT_FILE"
+if [[ "$JSON_TOOL" == "jq" ]] && [[ "$(head -c 3 "$OUT_FILE" | od -An -tx1 | tr -d ' \n')" == "efbbbf" ]]; then
+    JQ_INPUT_FILE="$(mktemp "${TMPDIR:-/tmp}/antigravity_outnobom.XXXXXX")" || die 1 'Unable to create temporary file.'
+    tail -c +4 "$OUT_FILE" >"$JQ_INPUT_FILE"
+fi
 
 PARSE_OK=1
 HEADER=""
 case "$JSON_TOOL" in
     jq)
         HEADER="$(jq -r '
-            (.status // "") as $status
-            | ((.denied_actions // []) | map("\(.action) (\(.display_name))") | join(", ")) as $denied
-            | ($status, $denied)
-        ' "$OUT_FILE" 2>/dev/null)" || PARSE_OK=0
-        [[ "$PARSE_OK" -ne 1 ]] || jq -r '.response // ""' "$OUT_FILE" >"$RESPONSE_FILE" 2>/dev/null || PARSE_OK=0
+            (.status // "" | if type == "string" then . else (tostring) end) as $status
+            | (.denied_actions) as $raw
+            | (if ($raw == null) then []
+               elif ($raw | type) == "array" then $raw
+               elif ($raw | type) == "object" then [$raw]
+               else "__SCHEMA_ERROR__" end) as $normalized
+            | if $normalized == "__SCHEMA_ERROR__" then
+                ($status, "", "__SCHEMA_ERROR__")
+              else
+                ($normalized
+                 | map("\(.action // "") (\(.display_name // ""))")
+                 | reduce .[] as $x ([]; if any(.[]; . == $x) then . else . + [$x] end)
+                 | join(", ")) as $denied
+                | ($status, $denied)
+              end
+        ' "$JQ_INPUT_FILE" 2>/dev/null)" || PARSE_OK=0
+        # The response is piped through base64 before leaving jq: some platforms' jq/CRT
+        # (notably Windows builds) rewrite embedded LF to CRLF on any text-mode stdout, which
+        # would corrupt a multi-line response; base64 has no embedded newlines to mangle.
+        if [[ "$PARSE_OK" -eq 1 ]]; then
+            if jq -r '.response // "" | if type == "string" then . else tostring end | @base64' "$JQ_INPUT_FILE" 2>/dev/null | tr -d '\n\r' | base64 -d >"$RESPONSE_FILE" 2>/dev/null; then
+                :
+            else
+                PARSE_OK=0
+            fi
+        fi
         ;;
     python3|python)
         HEADER="$("$JSON_TOOL" - "$OUT_FILE" "$RESPONSE_FILE" <<'PYEOF' 2>/dev/null
 import json, sys
+
+def to_str(v):
+    if v is None:
+        return ""
+    return v if isinstance(v, str) else str(v)
+
 try:
     if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stdout.reconfigure(encoding="utf-8", newline="")
 except Exception:
     pass
-with open(sys.argv[1], encoding="utf-8") as f:
+with open(sys.argv[1], encoding="utf-8-sig") as f:
     data = json.load(f)
-status = data.get("status", "")
-response = data.get("response", "") or ""
-denied = data.get("denied_actions") or []
-denied_text = ", ".join("%s (%s)" % (d.get("action", ""), d.get("display_name", "")) for d in denied)
+status = to_str(data.get("status", ""))
+response = to_str(data.get("response", ""))
+denied_raw = data.get("denied_actions")
+if denied_raw is None:
+    denied = []
+elif isinstance(denied_raw, dict):
+    denied = [denied_raw]
+elif isinstance(denied_raw, list):
+    denied = denied_raw
+else:
+    sys.stdout.write(status + "\n\n__SCHEMA_ERROR__\n")
+    with open(sys.argv[2], "wb") as rf:
+        rf.write(response.encode("utf-8"))
+    sys.exit(0)
+seen = []
+for d in denied:
+    entry = "%s (%s)" % (to_str(d.get("action", "")), to_str(d.get("display_name", "")))
+    if entry not in seen:
+        seen.append(entry)
+denied_text = ", ".join(seen)
 with open(sys.argv[2], "wb") as rf:
     rf.write(response.encode("utf-8"))
 sys.stdout.write(status + "\n" + denied_text + "\n")
@@ -306,46 +376,98 @@ PYEOF
     node)
         HEADER="$(node -e '
 const fs = require("fs");
-const data = JSON.parse(fs.readFileSync(process.argv[1], "utf-8"));
-const status = data.status || "";
-const response = data.response || "";
-const denied = data.denied_actions || [];
-const deniedText = denied.map(d => `${d.action} (${d.display_name})`).join(", ");
+let raw = fs.readFileSync(process.argv[1], "utf-8");
+if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
+const data = JSON.parse(raw);
+const toStr = (v) => (v === null || v === undefined) ? "" : (typeof v === "string" ? v : String(v));
+const status = toStr(data.status);
+const response = toStr(data.response);
+const deniedRaw = data.denied_actions;
+let denied;
+if (deniedRaw === null || deniedRaw === undefined) {
+    denied = [];
+} else if (Array.isArray(deniedRaw)) {
+    denied = deniedRaw;
+} else if (typeof deniedRaw === "object") {
+    denied = [deniedRaw];
+} else {
+    fs.writeFileSync(process.argv[2], response, "utf-8");
+    process.stdout.write(status + "\n\n__SCHEMA_ERROR__\n");
+    process.exit(0);
+}
+const seen = [];
+for (const d of denied) {
+    const entry = `${toStr(d.action)} (${toStr(d.display_name)})`;
+    if (!seen.includes(entry)) seen.push(entry);
+}
+const deniedText = seen.join(", ");
 fs.writeFileSync(process.argv[2], response, "utf-8");
 process.stdout.write(status + "\n" + deniedText + "\n");
 ' "$OUT_FILE" "$RESPONSE_FILE" 2>/dev/null)" || PARSE_OK=0
         ;;
 esac
 
+[[ "$JQ_INPUT_FILE" == "$OUT_FILE" ]] || rm -f "$JQ_INPUT_FILE"
+
 STATUS_LINE="$(printf '%s\n' "$HEADER" | sed -n '1p')"
 DENIED_TEXT="$(printf '%s\n' "$HEADER" | sed -n '2p')"
+SCHEMA_FLAG="$(printf '%s\n' "$HEADER" | sed -n '3p')"
 
 if [[ "$PARSE_OK" -ne 1 || -z "$STATUS_LINE" ]]; then
     RAW="$(head -c 500 "$OUT_FILE")"
     printf '%s agy returned unparseable output.\n%s\n' "$ERROR_SENTINEL" "$RAW"
+    stderr_tail
+    printf 'Error: agy returned unparseable output.\n' >&2
     exit 1
 fi
 
-RESPONSE_TEXT="$(cat "$RESPONSE_FILE")"
+if [[ "$SCHEMA_FLAG" == "__SCHEMA_ERROR__" ]]; then
+    printf '%s agy returned JSON with unexpected denied_actions type.\n' "$ERROR_SENTINEL"
+    stderr_tail
+    printf 'Error: agy returned JSON with unexpected denied_actions type.\n' >&2
+    exit 1
+fi
 
 if [[ -n "$DENIED_TEXT" ]]; then
     printf 'ANTIGRAVITY: denied_actions=%s\n' "$DENIED_TEXT" >&2
 fi
 
-if [[ "$STATUS_LINE" != "SUCCESS" ]]; then
+RESPONSE_IS_EMPTY=1
+[[ -z "$(tr -d '[:space:]' <"$RESPONSE_FILE" | head -c 1)" ]] || RESPONSE_IS_EMPTY=0
+
+emit_response() {
+    cat "$RESPONSE_FILE"
+    if [[ -s "$RESPONSE_FILE" ]]; then
+        last_byte="$(tail -c 1 "$RESPONSE_FILE" | od -An -tx1 | tr -d ' \n')"
+        [[ "$last_byte" == "0a" ]] || printf '\n'
+    fi
+}
+
+if [[ "$STATUS_LINE" == "TIMEOUT" ]]; then
+    printf '%s agy reported status TIMEOUT.\n' "$ERROR_SENTINEL"
+    [[ -z "$DENIED_TEXT" ]] || printf '[ANTIGRAVITY_DENIED_ACTIONS] %s\n' "$DENIED_TEXT"
+    [[ "$RESPONSE_IS_EMPTY" -eq 1 ]] || emit_response
+    printf 'Error: agy reported status TIMEOUT.\n' >&2
+    exit 2
+elif [[ "$STATUS_LINE" != "SUCCESS" ]]; then
     printf '%s agy reported status %s.\n' "$ERROR_SENTINEL" "$STATUS_LINE"
     [[ -z "$DENIED_TEXT" ]] || printf '[ANTIGRAVITY_DENIED_ACTIONS] %s\n' "$DENIED_TEXT"
-    [[ -z "$RESPONSE_TEXT" ]] || printf '%s\n' "$RESPONSE_TEXT"
+    [[ "$RESPONSE_IS_EMPTY" -eq 1 ]] || emit_response
+    printf 'Error: agy reported status %s.\n' "$STATUS_LINE" >&2
     exit 1
-elif [[ -z "$(printf '%s' "$RESPONSE_TEXT" | tr -d '[:space:]')" && -n "$DENIED_TEXT" ]]; then
+elif [[ "$RESPONSE_IS_EMPTY" -eq 1 && -n "$DENIED_TEXT" ]]; then
     printf '%s agy produced no response because tool permissions were denied in headless mode.\n' "$ERROR_SENTINEL"
     printf '[ANTIGRAVITY_DENIED_ACTIONS] %s\n' "$DENIED_TEXT"
+    stderr_tail
+    printf 'Error: agy produced no response because tool permissions were denied in headless mode.\n' >&2
     exit 1
-elif [[ -z "$(printf '%s' "$RESPONSE_TEXT" | tr -d '[:space:]')" ]]; then
-    die 1 'agy returned empty output.'
+elif [[ "$RESPONSE_IS_EMPTY" -eq 1 ]]; then
+    printf '%s agy returned empty output.\n' "$ERROR_SENTINEL"
+    stderr_tail
+    printf 'Error: agy returned empty output.\n' >&2
+    exit 1
 else
-    # $(...) command substitution already stripped trailing newlines from RESPONSE_TEXT.
-    printf '%s\n' "$RESPONSE_TEXT"
+    emit_response
     if [[ -n "$DENIED_TEXT" ]]; then
         printf '[ANTIGRAVITY_DENIED_ACTIONS] %s\n' "$DENIED_TEXT"
         printf '[ANTIGRAVITY_DENIED_ACTIONS] %s\n' "$DENIED_TEXT" >&2

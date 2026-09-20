@@ -11,6 +11,16 @@ function Run([string[]]$Arguments) {
     $o=& powershell -NoProfile -ExecutionPolicy Bypass -File $Wrapper @Arguments 2>&1
     return @{Code=$LASTEXITCODE; Text=($o|Out-String)}
 }
+function RunSplit([string[]]$Arguments) {
+    $outFile = Join-Path $Root ("split_out_" + [guid]::NewGuid().ToString("N") + ".txt")
+    $errFile = Join-Path $Root ("split_err_" + [guid]::NewGuid().ToString("N") + ".txt")
+    $allArgs = @("-NoProfile","-ExecutionPolicy","Bypass","-File",$Wrapper) + $Arguments
+    $p = Start-Process -FilePath "powershell" -ArgumentList $allArgs -RedirectStandardOutput $outFile -RedirectStandardError $errFile -Wait -PassThru -NoNewWindow
+    $stdout = if (Test-Path -LiteralPath $outFile) { Get-Content -LiteralPath $outFile -Raw -Encoding UTF8 } else { "" }
+    $stderr = if (Test-Path -LiteralPath $errFile) { Get-Content -LiteralPath $errFile -Raw -Encoding UTF8 } else { "" }
+    Remove-Item -LiteralPath $outFile,$errFile -ErrorAction SilentlyContinue
+    return @{Code=$p.ExitCode; Out=$stdout; Err=$stderr}
+}
 function Case([string]$Name,[scriptblock]$Body) {
     try { & $Body; $script:passed++; Write-Host "PASS $Name" } catch { $script:failed++; Write-Host "FAIL $Name -- $_" }
 }
@@ -129,6 +139,79 @@ try {
         $r=Run @("-Prompt","x")
         Remove-Item Env:FAKE_RAW_EMPTY -ErrorAction SilentlyContinue
         if($r.Code-eq 0-or$r.Text-notmatch'empty output'){throw $r.Text}
+    }
+    Case "denied_with_response" {
+        $env:FAKE_MODE="success"; $env:FAKE_DENIED="command:Bash"
+        $r=RunSplit @("-Prompt","x")
+        Remove-Item Env:FAKE_DENIED -ErrorAction SilentlyContinue
+        if($r.Code-ne 0){throw "$($r.Out)`n$($r.Err)"}
+        $responseIdx=$r.Out.IndexOf("fake response"); $deniedIdx=$r.Out.IndexOf("[ANTIGRAVITY_DENIED_ACTIONS] command (Bash)")
+        if($responseIdx-lt 0-or$deniedIdx-lt 0-or$responseIdx-ge$deniedIdx){throw $r.Out}
+        $stdoutDeniedCount=([regex]::Matches($r.Out,[regex]::Escape("[ANTIGRAVITY_DENIED_ACTIONS] command (Bash)"))).Count
+        if($stdoutDeniedCount-ne 1){throw "expected exactly one denied line on stdout: $($r.Out)"}
+        $errDeniedCount=([regex]::Matches($r.Err,[regex]::Escape("[ANTIGRAVITY_DENIED_ACTIONS]"))).Count
+        $errAnnounceCount=([regex]::Matches($r.Err,"ANTIGRAVITY: denied_actions=")).Count
+        if($errDeniedCount-ne 1-or$errAnnounceCount-ne 1){throw "stderr denied lines mismatch: $($r.Err)"}
+    }
+    Case "denied_empty_response" {
+        $env:FAKE_MODE="empty"; $env:FAKE_DENIED="escalate_admin:Bash"
+        $r=RunSplit @("-Prompt","x")
+        Remove-Item Env:FAKE_DENIED -ErrorAction SilentlyContinue
+        if($r.Code-ne 1-or$r.Out-notmatch'permissions were denied'-or$r.Out-notmatch'\[ANTIGRAVITY_DENIED_ACTIONS\] escalate_admin \(Bash\)'){throw "$($r.Out)`n$($r.Err)"}
+        if($r.Err-notmatch'ANTIGRAVITY: denied_actions='){throw "stderr missing announce: $($r.Err)"}
+    }
+    Case "denied_single_object" {
+        $env:FAKE_MODE="empty"; $env:FAKE_DENIED="escalate_admin:Bash"; $env:FAKE_DENIED_SHAPE="object"
+        $r=Run @("-Prompt","x")
+        Remove-Item Env:FAKE_DENIED,Env:FAKE_DENIED_SHAPE -ErrorAction SilentlyContinue
+        if($r.Code-ne 1-or$r.Text-notmatch'\[ANTIGRAVITY_DENIED_ACTIONS\] escalate_admin \(Bash\)'){throw $r.Text}
+    }
+    Case "denied_bad_type" {
+        $env:FAKE_MODE="success"; $env:FAKE_DENIED="escalate_admin:Bash"; $env:FAKE_DENIED_SHAPE="number"
+        $r=Run @("-Prompt","x")
+        Remove-Item Env:FAKE_DENIED,Env:FAKE_DENIED_SHAPE -ErrorAction SilentlyContinue
+        if($r.Code-eq 0-or$r.Text-notmatch'unexpected denied_actions type'){throw $r.Text}
+    }
+    Case "denied_dedupe" {
+        $env:FAKE_MODE="success"; $env:FAKE_DENIED="command:Bash,command:Bash,escalate_admin:Bash"
+        $r=Run @("-Prompt","x")
+        Remove-Item Env:FAKE_DENIED -ErrorAction SilentlyContinue
+        if($r.Code-ne 0-or$r.Text-notmatch'\[ANTIGRAVITY_DENIED_ACTIONS\] command \(Bash\), escalate_admin \(Bash\)'){throw $r.Text}
+    }
+    Case "status_timeout" {
+        $env:FAKE_MODE="success"; $env:FAKE_STATUS="TIMEOUT"
+        $r=Run @("-Prompt","x")
+        Remove-Item Env:FAKE_STATUS -ErrorAction SilentlyContinue
+        if($r.Code-ne 2-or$r.Text-notmatch'status TIMEOUT'){throw $r.Text}
+    }
+    Case "stderr_tail_on_empty" {
+        $env:FAKE_MODE="empty"; $env:FAKE_RAW_EMPTY="1"; $env:FAKE_STDERR="hint line"
+        $r=Run @("-Prompt","x")
+        Remove-Item Env:FAKE_RAW_EMPTY,Env:FAKE_STDERR -ErrorAction SilentlyContinue
+        if($r.Code-eq 0-or$r.Text-notmatch'agy stderr \(tail\):'-or$r.Text-notmatch'hint line'){throw $r.Text}
+    }
+    Case "large_response" {
+        $env:FAKE_MODE="success"
+        $largeFile=Join-Path $Root "large_response.txt"
+        $sb=New-Object Text.StringBuilder
+        [void]$sb.Append(('x' * 3000000))
+        [void]$sb.Append("`n日本語の行`n")
+        [IO.File]::WriteAllText($largeFile,$sb.ToString(),(New-Object Text.UTF8Encoding($false)))
+        $env:FAKE_RESPONSE_FILE=$largeFile
+        $r=Run @("-Prompt","x")
+        Remove-Item Env:FAKE_RESPONSE_FILE -ErrorAction SilentlyContinue
+        if($r.Code-ne 0){throw $r.Text}
+        if($r.Text.Length-lt 3000000){throw "response too short: $($r.Text.Length)"}
+        if($r.Text-notmatch'日本語の行'){throw "missing Japanese line"}
+    }
+    Case "crlf_and_trailing_newlines" {
+        $env:FAKE_MODE="success"
+        $crlfFile=Join-Path $Root "crlf_response.txt"
+        [IO.File]::WriteAllText($crlfFile,"line1`r`nline2`n`n`n",(New-Object Text.UTF8Encoding($false)))
+        $env:FAKE_RESPONSE_FILE=$crlfFile
+        $r=Run @("-Prompt","x")
+        Remove-Item Env:FAKE_RESPONSE_FILE -ErrorAction SilentlyContinue
+        if($r.Code-ne 0-or$r.Text-notmatch'line1'-or$r.Text-notmatch'line2'){throw $r.Text}
     }
 } finally {
     $env:PATH=$oldPath; Remove-Item Env:ANTIGRAVITY_WRAPPER_MODEL -ErrorAction SilentlyContinue

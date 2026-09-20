@@ -242,30 +242,64 @@ try {
     $stdout = $stdoutTask.Result
     $stderr = $stderrTask.Result
     if ($process.ExitCode -ne 0) { Fail $process.ExitCode "agy exited with status $($process.ExitCode). $($stderr.Trim())" }
-    if ([string]::IsNullOrWhiteSpace($stdout)) { Fail 1 "agy returned empty output." }
-    $obj = $null
-    try { $obj = $stdout | ConvertFrom-Json -ErrorAction Stop } catch { $obj = $null }
-    if (-not $obj -or -not ($obj.PSObject.Properties['status'])) {
-        $snippet = $stdout.Substring(0, [Math]::Min(500, $stdout.Length))
-        Fail 1 "agy returned unparseable output.`n$snippet"
+    function Get-StderrTail {
+        if ([string]::IsNullOrWhiteSpace($stderr)) { return "" }
+        $lines = $stderr.TrimEnd() -split "`r`n|`n" | Select-Object -Last 5
+        $truncated = $lines | ForEach-Object { if ($_.Length -gt 400) { $_.Substring(0, 400) } else { $_ } }
+        return "`nagy stderr (tail):`n" + ($truncated -join "`n")
     }
-    $status = $obj.status
-    $response = if ($obj.PSObject.Properties['response']) { [string]$obj.response } else { "" }
-    $deniedList = @()
-    if ($obj.PSObject.Properties['denied_actions'] -and $obj.denied_actions) {
-        foreach ($d in $obj.denied_actions) { $deniedList += "$($d.action) ($($d.display_name))" }
+    if ([string]::IsNullOrWhiteSpace($stdout)) { Fail 1 "agy returned empty output.$(Get-StderrTail)" }
+    $obj = $null
+    $parseOk = $true
+    try {
+        Add-Type -AssemblyName System.Web.Extensions
+        $ser = New-Object System.Web.Script.Serialization.JavaScriptSerializer
+        $ser.MaxJsonLength = [int]::MaxValue
+        $obj = $ser.DeserializeObject($stdout)
+    } catch { $parseOk = $false }
+    if (-not $parseOk -or -not ($obj -is [Collections.Generic.IDictionary[string,object]]) -or -not $obj.ContainsKey('status')) {
+        $snippet = $stdout.Substring(0, [Math]::Min(500, $stdout.Length))
+        Fail 1 "agy returned unparseable output.`n$snippet$(Get-StderrTail)"
+    }
+    $status = [string]$obj['status']
+    $response = if ($obj.ContainsKey('response') -and $null -ne $obj['response']) { [string]$obj['response'] } else { "" }
+    $rawDenied = if ($obj.ContainsKey('denied_actions')) { $obj['denied_actions'] } else { $null }
+    $deniedEntries = @()
+    if ($null -eq $rawDenied) {
+        $deniedEntries = @()
+    } elseif ($rawDenied -is [Collections.Generic.IDictionary[string,object]]) {
+        $deniedEntries = @($rawDenied)
+    } elseif ($rawDenied -is [Collections.IEnumerable] -and -not ($rawDenied -is [string])) {
+        $deniedEntries = @($rawDenied)
+    } else {
+        Fail 1 "agy returned JSON with unexpected denied_actions type.$(Get-StderrTail)"
+    }
+    $deniedList = New-Object Collections.Generic.List[string]
+    foreach ($d in $deniedEntries) {
+        if (-not ($d -is [Collections.Generic.IDictionary[string,object]])) {
+            Fail 1 "agy returned JSON with unexpected denied_actions type.$(Get-StderrTail)"
+        }
+        $action = if ($d.ContainsKey('action') -and $null -ne $d['action']) { [string]$d['action'] } else { "" }
+        $displayName = if ($d.ContainsKey('display_name') -and $null -ne $d['display_name']) { [string]$d['display_name'] } else { "" }
+        $entry = "$action ($displayName)"
+        if (-not $deniedList.Contains($entry)) { $deniedList.Add($entry) }
     }
     $deniedText = $deniedList -join ", "
     if ($deniedList.Count) { [Console]::Error.WriteLine("ANTIGRAVITY: denied_actions=$deniedText") }
-    if ($status -ne "SUCCESS") {
+    if ($status -eq "TIMEOUT") {
+        $extra = ""
+        if ($deniedList.Count) { $extra += "`n[ANTIGRAVITY_DENIED_ACTIONS] $deniedText" }
+        if (-not [string]::IsNullOrWhiteSpace($response)) { $extra += "`n" + $response.TrimEnd() }
+        Fail 2 "agy reported status TIMEOUT.$extra"
+    } elseif ($status -ne "SUCCESS") {
         $extra = ""
         if ($deniedList.Count) { $extra += "`n[ANTIGRAVITY_DENIED_ACTIONS] $deniedText" }
         if (-not [string]::IsNullOrWhiteSpace($response)) { $extra += "`n" + $response.TrimEnd() }
         Fail 1 "agy reported status $status.$extra"
     } elseif ([string]::IsNullOrWhiteSpace($response) -and $deniedList.Count) {
-        Fail 1 "agy produced no response because tool permissions were denied in headless mode.`n[ANTIGRAVITY_DENIED_ACTIONS] $deniedText"
+        Fail 1 "agy produced no response because tool permissions were denied in headless mode.`n[ANTIGRAVITY_DENIED_ACTIONS] $deniedText$(Get-StderrTail)"
     } elseif ([string]::IsNullOrWhiteSpace($response)) {
-        Fail 1 "agy returned empty output."
+        Fail 1 "agy returned empty output.$(Get-StderrTail)"
     } else {
         Write-Output $response.TrimEnd()
         if ($deniedList.Count) {

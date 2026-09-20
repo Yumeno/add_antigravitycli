@@ -26,7 +26,11 @@ Issue [#14](https://github.com/Yumeno/add_antigravitycli/issues/14) の対応。
 - `status` が `SUCCESS` 以外 → `agy reported status <status>.` で exit 1(拒否一覧と本文があれば併記)
 - JSON として解析できない → `agy returned unparseable output.` + 先頭 500 文字で exit 1
 - `response` あり + 拒否あり → 本文を出し末尾に拒否行、exit 0(依頼が完了しているかは host が判断。Codex の助言「CLI の正常終了と依頼の完了を分ける」に従う)
-- Bash 版の JSON 解析は `jq` → `python3` → `python` → `node` の順で自動選択。いずれも無ければ従来の text 出力に戻り、stderr に警告(ランタイム依存を増やさない)。`ANTIGRAVITY_WRAPPER_JSON_TOOL=none` でテスト用に強制
+- Bash 版の JSON 解析は `jq` → `python3` → `python` → `node` の順で自動選択。各候補は「実際に `{"a":1}` を解析できるか」で probe する(Windows の `python3` は PATH 上にあっても動かない Store スタブのことがある。この端末で実在)。いずれも無ければ従来の text 出力に戻り、stderr に警告(ランタイム依存を増やさない)。`ANTIGRAVITY_WRAPPER_JSON_TOOL=none` でテスト用に強制
+- `status` が `TIMEOUT` なら wrapper 自身のタイムアウトと同じ exit 2
+- 空応答・解析不能・拒否で空の失敗時は、agy の stderr 末尾 5 行(各 400 文字まで)を `agy stderr (tail):` として sentinel の後に転記(issue #14 の本題)
+- `denied_actions` は配列・単一 object・null・欠落を正規化し、それ以外の型は `unexpected denied_actions type` で失敗。表示は初出順で重複排除
+- `response` はバイト列をそのまま出力(末尾改行・CRLF を保持)。拒否行を続ける場合だけ改行を補う
 
 ## 変更内容
 
@@ -37,7 +41,18 @@ Issue [#14](https://github.com/Yumeno/add_antigravitycli/issues/14) の対応。
 - `ask-antigravity` / `ask-antigravity-with-context` の SKILL.md(両コピー): `[ANTIGRAVITY_DENIED_ACTIONS]` の意味と、空応答で失敗したら「tool を使わず答える」を指示に加えて再実行する手順を追加
 - 全 skill 同梱 bundle を sync tool で再配布
 
+## レビュー Round 1 と反映
+
+- Codex gpt-5.6-terra(コード): Major 3(PS 5.1 `ConvertFrom-Json` の約 2MB 上限、Bash 版が `denied_actions` 単一 object で解析失敗、PS 版が空応答時に stderr のヒントを出さない)、Minor 4(Bash の末尾改行欠落、stdout/stderr 分離テストなし、異常系・型・サイズのテスト不足、fake の JSON エスケープ不完全)、Nit 1(trap 上書き)
+  - 2MB 上限は**この端末の PS 5.1(5.1.26100)では再現せず**(1,200 万文字の `response` も解析成功)。ただし `JavaScriptSerializer`(`MaxJsonLength = int.MaxValue`)への切替と 3MB 応答の回帰テストは無害なので採用
+  - その他はすべて反映
+- agy(仕様): Minor 2(Python/Node パーサーの BOM、重複排除)、Nit 1(Node の undefined)。`status` は `SUCCESS` の他に `ERROR` / `TIMEOUT` / `MAX_TURNS`(UNSURE)/ `CANCELLED` 等があり、`denied_actions` は非空 `response` と共存し得る・同一 action が複数回入り得る、との回答。すべて反映
+- 修正中に Sonnet が発見した実バグ: この端末の jq 1.8.1 は stdout が text mode のとき文字列中の `
+` を `
+` に書き換える(複数行 `response` が壊れる)。jq 経路は `@base64` で取り出して `base64 -d` で復号する方式に変更し、CRLF・末尾複数改行を含む往復でバイト一致を確認
+- fake-agy.ps1 は `[Console]::OutputEncoding` を UTF-8 にしないと cp932 で JSON を書いて日本語が壊れる(大サイズ日本語テストで顕在化)。テスト側の修正
+
 ## 検証
 
-- unit: test-wrapper.ps1 18/18、test-wrapper.sh 15/15、test-implement.ps1 OK、test-implement.sh 4/4、test-verify.ps1 OK、test-skill-bundles.ps1 OK、sync -Check 同期済み
-- 実 agy 1.2.7 E2E(両 wrapper、各 2 件): 成功時は本文のみ(日本語含む)、`git status` を実行させる拒否ケースは `[ANTIGRAVITY_DENIED_ACTIONS] escalate_admin (Bash)` 付きで exit 1
+- unit: test-wrapper.ps1 27/27、test-wrapper.sh 24/24、test-implement.ps1 OK、test-implement.sh 4/4、test-verify.ps1 OK、test-skill-bundles.ps1 OK、sync -Check 同期済み
+- 実 agy 1.2.7 E2E(両 wrapper、成功・拒否の各 2 件以上): 成功時は本文のみ(日本語・空行含む)、`git status` を実行させる拒否ケースは `[ANTIGRAVITY_DENIED_ACTIONS] escalate_admin (Bash)` と stderr tail 付きで exit 1。空行を含む返答を求めた際に agent が command ツールを使おうとして `command (RunCommand)` として検知された例もあり(display_name はツールにより異なる)

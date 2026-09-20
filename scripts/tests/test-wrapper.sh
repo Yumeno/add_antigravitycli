@@ -116,15 +116,104 @@ t_raw_empty() {
     [[ $code -eq 1 && "$out" == *'empty output'* ]]
 }
 t_no_parser_fallback() {
-    export FAKE_AGY_OUTPUT=ok ANTIGRAVITY_WRAPPER_JSON_TOOL=none
+    export FAKE_AGY_OUTPUT=ok ANTIGRAVITY_WRAPPER_JSON_TOOL=none FAKE_AGY_DENIED=escalate_admin:Bash
     set +e
     out="$(PATH="$ROOT/bin:$PATH" bash "$WRAPPER" --prompt hi 2>"$ROOT/no_parser_err")"
     code=$?
     set -e
-    unset ANTIGRAVITY_WRAPPER_JSON_TOOL
+    unset ANTIGRAVITY_WRAPPER_JSON_TOOL FAKE_AGY_DENIED
     [[ $code -eq 0 && "$out" == *'ok'* ]] || return 1
     ! grep -qx -- '--output-format' "$ROOT/argv" || return 1
-    grep -qF 'denied-action detection disabled' "$ROOT/no_parser_err"
+    grep -qF 'denied-action detection disabled' "$ROOT/no_parser_err" || return 1
+    [[ "$out" != *'[ANTIGRAVITY_DENIED_ACTIONS]'* ]]
+}
+t_denied_single_object() {
+    export FAKE_AGY_OUTPUT='' FAKE_AGY_DENIED='escalate_admin:Bash' FAKE_AGY_DENIED_SHAPE=object
+    set +e; out="$(PATH="$ROOT/bin:$PATH" bash "$WRAPPER" --prompt hi 2>/dev/null)"; code=$?; set -e
+    unset FAKE_AGY_DENIED FAKE_AGY_DENIED_SHAPE
+    [[ $code -eq 1 && "$out" == *'[ANTIGRAVITY_DENIED_ACTIONS] escalate_admin (Bash)'* ]]
+}
+t_denied_bad_type() {
+    export FAKE_AGY_OUTPUT='fake response' FAKE_AGY_DENIED='escalate_admin:Bash' FAKE_AGY_DENIED_SHAPE=number
+    set +e; out="$(PATH="$ROOT/bin:$PATH" bash "$WRAPPER" --prompt hi 2>/dev/null)"; code=$?; set -e
+    unset FAKE_AGY_DENIED FAKE_AGY_DENIED_SHAPE
+    [[ $code -eq 1 && "$out" == *'unexpected denied_actions type'* ]]
+}
+t_denied_dedupe() {
+    export FAKE_AGY_OUTPUT='fake response' FAKE_AGY_DENIED='command:Bash,command:Bash,escalate_admin:Bash'
+    set +e; out="$(PATH="$ROOT/bin:$PATH" bash "$WRAPPER" --prompt hi 2>/dev/null)"; code=$?; set -e
+    unset FAKE_AGY_DENIED
+    [[ $code -eq 0 && "$out" == *'[ANTIGRAVITY_DENIED_ACTIONS] command (Bash), escalate_admin (Bash)'* ]]
+}
+t_status_timeout() {
+    export FAKE_AGY_OUTPUT='fake response' FAKE_AGY_STATUS=TIMEOUT
+    set +e; out="$(PATH="$ROOT/bin:$PATH" bash "$WRAPPER" --prompt hi 2>/dev/null)"; code=$?; set -e
+    unset FAKE_AGY_STATUS
+    [[ $code -eq 2 && "$out" == *'status TIMEOUT'* ]]
+}
+t_stderr_tail_on_empty() {
+    export FAKE_AGY_RAW_EMPTY=1 FAKE_AGY_STDERR='hint line'
+    set +e; out="$(PATH="$ROOT/bin:$PATH" bash "$WRAPPER" --prompt hi 2>/dev/null)"; code=$?; set -e
+    unset FAKE_AGY_RAW_EMPTY FAKE_AGY_STDERR
+    [[ $code -eq 1 && "$out" == *'agy stderr (tail):'* && "$out" == *'hint line'* ]]
+}
+t_large_response() {
+    large_file="$ROOT/large_response.txt"
+    { printf '%s' "$(head -c 3000000 </dev/zero | tr '\0' 'x')"; printf '\n日本語の行\n'; } >"$large_file"
+    export FAKE_AGY_RESPONSE_FILE="$large_file"
+    set +e; out="$(PATH="$ROOT/bin:$PATH" bash "$WRAPPER" --prompt hi 2>/dev/null)"; code=$?; set -e
+    unset FAKE_AGY_RESPONSE_FILE
+    [[ $code -eq 0 ]] || return 1
+    [[ "${#out}" -ge 3000000 ]] || return 1
+    [[ "$out" == *'日本語の行'* ]]
+}
+t_crlf_and_trailing_newlines() {
+    crlf_file="$ROOT/crlf_response.txt"
+    printf 'line1\r\nline2\n\n\n' >"$crlf_file"
+    export FAKE_AGY_RESPONSE_FILE="$crlf_file"
+    set +e
+    PATH="$ROOT/bin:$PATH" bash "$WRAPPER" --prompt hi >"$ROOT/crlf_out" 2>/dev/null
+    code=$?
+    set -e
+    unset FAKE_AGY_RESPONSE_FILE
+    [[ $code -eq 0 ]] || return 1
+    cmp -s "$crlf_file" "$ROOT/crlf_out"
+}
+tool_is_usable() {
+    # Some Windows setups have a PATH entry for python3/python that is a broken App
+    # Execution Alias stub; command -v alone is not enough to know it actually runs.
+    case "$1" in
+        jq) command -v jq >/dev/null 2>&1 ;;
+        python3|python) command -v "$1" >/dev/null 2>&1 && "$1" -c 'import json' >/dev/null 2>&1 ;;
+        node) command -v node >/dev/null 2>&1 && node -e '1' >/dev/null 2>&1 ;;
+        *) return 1 ;;
+    esac
+}
+t_bom_input() {
+    export FAKE_AGY_OUTPUT='bom response' FAKE_AGY_BOM=1
+    local any_tested=0
+    for tool in jq python3 python node; do
+        tool_is_usable "$tool" || continue
+        any_tested=1
+        set +e
+        out="$(PATH="$ROOT/bin:$PATH" ANTIGRAVITY_WRAPPER_JSON_TOOL="$tool" bash "$WRAPPER" --prompt hi 2>/dev/null)"
+        code=$?
+        set -e
+        if [[ $code -ne 0 || "$out" != *'bom response'* ]]; then
+            unset FAKE_AGY_OUTPUT FAKE_AGY_BOM
+            return 1
+        fi
+    done
+    unset FAKE_AGY_OUTPUT FAKE_AGY_BOM
+    [[ "$any_tested" -eq 1 ]]
+}
+t_response_file_cleanup() {
+    before="$(ls "${TMPDIR:-/tmp}" 2>/dev/null | grep -c '^antigravity_response\.' || true)"
+    export FAKE_AGY_OUTPUT='ok'
+    PATH="$ROOT/bin:$PATH" bash "$WRAPPER" --prompt hi >/dev/null 2>/dev/null
+    unset FAKE_AGY_OUTPUT
+    after="$(ls "${TMPDIR:-/tmp}" 2>/dev/null | grep -c '^antigravity_response\.' || true)"
+    [[ "$before" -eq "$after" ]]
 }
 check stdin_is_not_argv t_stdin
 check expected_cli_arguments t_args
@@ -141,5 +230,14 @@ check non_success_status t_non_success_status
 check unparseable_output t_unparseable_output
 check raw_empty t_raw_empty
 check no_parser_fallback t_no_parser_fallback
+check denied_single_object t_denied_single_object
+check denied_bad_type t_denied_bad_type
+check denied_dedupe t_denied_dedupe
+check status_timeout t_status_timeout
+check stderr_tail_on_empty t_stderr_tail_on_empty
+check large_response t_large_response
+check crlf_and_trailing_newlines t_crlf_and_trailing_newlines
+check bom_input t_bom_input
+check response_file_cleanup t_response_file_cleanup
 printf 'Passed: %d / %d\n' "$passed" "$total"
 [[ "$passed" -eq "$total" ]]
