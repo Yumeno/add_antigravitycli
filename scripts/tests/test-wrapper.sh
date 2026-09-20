@@ -145,6 +145,13 @@ t_denied_dedupe() {
     unset FAKE_AGY_DENIED
     [[ $code -eq 0 && "$out" == *'[ANTIGRAVITY_DENIED_ACTIONS] command (Bash), escalate_admin (Bash)'* ]]
 }
+t_conversation_id_on_stderr() {
+    export FAKE_AGY_OUTPUT='fake response'
+    set +e; out="$(PATH="$ROOT/bin:$PATH" bash "$WRAPPER" --prompt hi 2>"$ROOT/convid_err")"; code=$?; set -e
+    [[ $code -eq 0 ]] || return 1
+    grep -qF 'ANTIGRAVITY: conversation_id=fake' "$ROOT/convid_err" || return 1
+    [[ "$out" != *'conversation_id'* ]]
+}
 t_status_timeout() {
     export FAKE_AGY_OUTPUT='fake response' FAKE_AGY_STATUS=TIMEOUT
     set +e; out="$(PATH="$ROOT/bin:$PATH" bash "$WRAPPER" --prompt hi 2>/dev/null)"; code=$?; set -e
@@ -233,6 +240,7 @@ check no_parser_fallback t_no_parser_fallback
 check denied_single_object t_denied_single_object
 check denied_bad_type t_denied_bad_type
 check denied_dedupe t_denied_dedupe
+check conversation_id_on_stderr t_conversation_id_on_stderr
 check status_timeout t_status_timeout
 check stderr_tail_on_empty t_stderr_tail_on_empty
 check large_response t_large_response

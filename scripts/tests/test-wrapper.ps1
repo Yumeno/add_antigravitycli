@@ -187,6 +187,12 @@ try {
         Remove-Item Env:FAKE_DENIED -ErrorAction SilentlyContinue
         if($r.Code-ne 0-or$r.Text-notmatch'\[ANTIGRAVITY_DENIED_ACTIONS\] command \(Bash\), escalate_admin \(Bash\)'){throw $r.Text}
     }
+    Case "conversation_id_on_stderr" {
+        $env:FAKE_MODE="success"
+        $r=RunSplit @("-Prompt","x")
+        if($r.Code-ne 0-or$r.Err-notmatch'ANTIGRAVITY: conversation_id=fake'){throw "$($r.Out)`n$($r.Err)"}
+        if($r.Out-match'conversation_id'){throw "conversation_id must not appear on stdout: $($r.Out)"}
+    }
     Case "status_timeout" {
         $env:FAKE_MODE="success"; $env:FAKE_STATUS="TIMEOUT"
         $r=Run @("-Prompt","x")

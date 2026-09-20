@@ -3,10 +3,24 @@
     [Parameter(Mandatory=$true)][string]$Repo,
     [Parameter(Mandatory=$true)][string]$Source,
     [Parameter(Mandatory=$true)][string]$Destination,
+    [Parameter(Mandatory=$true)][string]$ConversationId,
     [switch]$Overwrite
 )
 $ErrorActionPreference = "Stop"
 function Fail([string]$Message) { Write-Output "[ANTIGRAVITY_ARTIFACT_ERROR] $Message"; exit 1 }
+
+# Image size limits. Normal workload is agy-generated images in the 1024-1376px range;
+# these caps just keep this helper from processing pathological/hostile input.
+$MaxImageDimension = 8192
+$MaxImagePixels = 64000000
+
+# Threat model: validation and the copy are separate filesystem operations, so this helper
+# is NOT safe against a concurrent writer with access to the same directories (same-user
+# TOCTOU races). It defends against wrong/hostile paths reported by the agent, links, and
+# unsupported/malformed content -- not against a racing process swapping files mid-import.
+# Output-line contract: source=/destination= are printed raw and are the last two fields
+# specifically because paths may contain '=' or spaces; both are validated to contain no
+# CR/LF so no line can be forged by an embedded newline.
 
 # Win32 real-path resolver (same approach as antigravity-implement.ps1): follows
 # every reparse-point hop (symlink/junction) in one call, unlike Resolve-Path.
@@ -74,6 +88,10 @@ function Protected([string]$RelPath) {
 }
 
 try {
+    if ($Source -match "[\r\n]" -or $Destination -match "[\r\n]") { Fail "path contains a line break" }
+    if ([string]::IsNullOrEmpty($ConversationId) -or $ConversationId -notmatch '^[A-Za-z0-9-]+$' -or $ConversationId.Contains("..")) {
+        Fail "Invalid conversation id: $ConversationId"
+    }
     if (-not (Test-Path -LiteralPath $Repo -PathType Container)) { Fail "Repository not found: $Repo" }
     $requestedRoot = (Resolve-Path -LiteralPath $Repo).Path
     $top = & git -C $requestedRoot -c core.excludesFile= rev-parse --show-toplevel
@@ -92,9 +110,12 @@ try {
     $sourceItem = Get-Item -LiteralPath $Source -Force
     if ($sourceItem.PSIsContainer) { Fail "Source is not a regular file: $Source" }
     $sourceReal = Get-Win32RealPath $Source
-    $brainPrefix = $brainRoot.TrimEnd("\","/") + [IO.Path]::DirectorySeparatorChar
-    if (-not $sourceReal.StartsWith($brainPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-        Fail "Source must be inside the Antigravity brain directory: $Source"
+    $convDir = Get-Win32RealPath (Join-Path $brainRoot $ConversationId)
+    $convPrefix = $convDir.TrimEnd("\","/") + [IO.Path]::DirectorySeparatorChar
+    $sourceParent = Split-Path -Parent $sourceReal
+    $sourceParentWithSep = $sourceParent.TrimEnd("\","/") + [IO.Path]::DirectorySeparatorChar
+    if (-not $sourceParentWithSep.Equals($convPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        Fail "Source is not inside the conversation directory: $($brainRoot.TrimEnd('\','/'))/$ConversationId"
     }
     $sourceBytes = [IO.File]::ReadAllBytes($sourceReal)
     if ($sourceBytes.Length -eq 0) { Fail "Source file is empty: $Source" }
@@ -106,38 +127,43 @@ try {
     }
     $type = $null; $width = 0; $height = 0
     $pngSig = [byte[]](0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A)
-    $jpegSig = [byte[]](0xFF,0xD8,0xFF)
     $isPng = ($sourceBytes.Length -ge 8) -and (-not (Compare-Object $sourceBytes[0..7] $pngSig))
     $isJpeg = ($sourceBytes.Length -ge 3) -and $sourceBytes[0] -eq 0xFF -and $sourceBytes[1] -eq 0xD8 -and $sourceBytes[2] -eq 0xFF
     if ($isPng) {
         $type = "png"
-        # IHDR chunk: length(4) type(4)="IHDR" width(4) height(4) at offset 8.
-        if ($sourceBytes.Length -lt 24) { Fail "could not read image dimensions" }
+        # First chunk must be IHDR with length exactly 13, and the file must contain the
+        # whole chunk plus its 4-byte CRC (>= 8 sig + 4 len + 4 tag + 13 data + 4 crc = 33 bytes).
+        if ($sourceBytes.Length -lt 33) { Fail "could not read image dimensions" }
+        $ihdrLen = Get-Png16BE $sourceBytes 8
         $ihdrTag = [Text.Encoding]::ASCII.GetString($sourceBytes[12..15])
-        if ($ihdrTag -ne "IHDR") { Fail "could not read image dimensions" }
+        if ($ihdrTag -ne "IHDR" -or $ihdrLen -ne 13) { Fail "could not read image dimensions" }
         $width = Get-Png16BE $sourceBytes 16
         $height = Get-Png16BE $sourceBytes 20
     } elseif ($isJpeg) {
         $type = "jpeg"
         $pos = 2
         $found = $false
-        while ($pos + 4 -le $sourceBytes.Length) {
+        while ($pos + 2 -le $sourceBytes.Length) {
             if ($sourceBytes[$pos] -ne 0xFF) { $pos++; continue }
             $marker = $sourceBytes[$pos+1]
             if ($marker -eq 0xFF) { $pos++; continue }
-            if ($marker -eq 0xD8 -or $marker -eq 0xD9) { $pos += 2; continue }
-            if ($marker -ge 0xD0 -and $marker -le 0xD7) { $pos += 2; continue }
-            if ($pos + 4 -gt $sourceBytes.Length) { break }
+            # Standalone markers (no length field): RST0-7, TEM, SOI, EOI.
+            if (($marker -ge 0xD0 -and $marker -le 0xD7) -or $marker -eq 0x01 -or $marker -eq 0xD8) { $pos += 2; continue }
+            if ($marker -eq 0xD9) { break }  # EOI before a SOF: fail below.
+            if ($marker -eq 0xDA) { break }  # SOS before a SOF: fail below.
+            if ($pos + 4 -gt $sourceBytes.Length) { Fail "could not read image dimensions" }
             $segLen = ([int]$sourceBytes[$pos+2] -shl 8) -bor [int]$sourceBytes[$pos+3]
+            if ($segLen -lt 2 -or ($pos + 2 + $segLen) -gt $sourceBytes.Length) { Fail "could not read image dimensions" }
             $isSof = ($marker -ge 0xC0 -and $marker -le 0xCF) -and $marker -ne 0xC4 -and $marker -ne 0xC8 -and $marker -ne 0xCC
             if ($isSof) {
-                if ($pos + 9 -gt $sourceBytes.Length) { Fail "could not read image dimensions" }
+                if ($segLen -lt 8) { Fail "could not read image dimensions" }
+                $nf = [int]$sourceBytes[$pos+9]
+                if ($segLen -ne (8 + 3 * $nf)) { Fail "could not read image dimensions" }
                 $height = ([int]$sourceBytes[$pos+5] -shl 8) -bor [int]$sourceBytes[$pos+6]
                 $width = ([int]$sourceBytes[$pos+7] -shl 8) -bor [int]$sourceBytes[$pos+8]
                 $found = $true
                 break
             }
-            if ($segLen -lt 2) { Fail "could not read image dimensions" }
             $pos += 2 + $segLen
         }
         if (-not $found) { Fail "could not read image dimensions" }
@@ -145,6 +171,9 @@ try {
         Fail "unsupported or unrecognized image content"
     }
     if ($width -le 0 -or $height -le 0) { Fail "could not read image dimensions" }
+    if ($width -gt $MaxImageDimension -or $height -gt $MaxImageDimension -or ([int64]$width * [int64]$height) -gt $MaxImagePixels) {
+        Fail "image dimensions out of range: ${width}x${height}"
+    }
 
     # --- validate destination ---
     $destInput = $Destination
@@ -171,20 +200,35 @@ try {
         if (-not $Overwrite) { Fail "Destination already exists: $destRel" }
     }
 
+    # Hash the bytes we already have in memory: this is the expected hash. Never re-open the
+    # source path again after this point (it was read once, above, before any validation of
+    # the destination could have raced with a concurrent writer at the source).
+    $sourceHasher = [Security.Cryptography.SHA256]::Create()
+    try { $sourceHash = ([BitConverter]::ToString($sourceHasher.ComputeHash($sourceBytes))).Replace("-","").ToLowerInvariant() }
+    finally { $sourceHasher.Dispose() }
+
     # --- copy: write to a temp file in the destination directory, then move into place ---
+    # Note: Fail() calls exit, which is not caught by a try/catch here, so any failure path
+    # below must remove $tempPath itself before calling Fail (never leave a partial temp file).
     $tempPath = Join-Path $destParentReal (".antigravity-artifact-" + [guid]::NewGuid().ToString("N") + ".tmp")
     try {
         [IO.File]::WriteAllBytes($tempPath, $sourceBytes)
-        if (Test-IsLink $destResolved) { Fail "Destination must not be a link" }
+        $destHash = (Get-FileHash -LiteralPath $tempPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($sourceHash -ne $destHash) {
+            Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+            Fail "Copied file hash does not match source"
+        }
+        # Final link re-check happens as close as possible to the rename that replaces $Overwrite's
+        # target, so the destination is never lost except by this one atomic move.
+        if (Test-IsLink $destResolved) {
+            Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+            Fail "Destination must not be a link"
+        }
         Move-Item -LiteralPath $tempPath -Destination $destResolved -Force:$Overwrite
     } catch {
         Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
         throw
     }
-
-    $sourceHash = (Get-FileHash -LiteralPath $sourceReal -Algorithm SHA256).Hash.ToLowerInvariant()
-    $destHash = (Get-FileHash -LiteralPath $destResolved -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($sourceHash -ne $destHash) { Fail "Copied file hash does not match source" }
 
     Write-Output "[ANTIGRAVITY_ARTIFACT_OK] type=$type width=$width height=$height bytes=$($sourceBytes.Length) sha256=$sourceHash source=$sourceReal destination=$destRel"
     exit 0

@@ -33,7 +33,7 @@
 
 ```
 Do NOT copy, move or convert the generated file and do NOT run any shell commands.
-When done, report on separate lines:
+When done, report on separate lines (one ARTIFACT_PATH line per generated image):
 ARTIFACT_PATH: <absolute path of the generated file>
 IMAGE_NAME: <the ImageName value you passed to the image tool>
 ASPECT_RATIO: <the AspectRatio value you passed>
@@ -41,9 +41,11 @@ ASPECT_RATIO: <the AspectRatio value you passed>
 
 - 上記 1 件では agent は `ARTIFACT_PATH: C:\Users\<user>\.gemini\antigravity-cli\brain\<conversation-id>\<ImageName>_<ms>.jpg` の形で報告した [実測: 1.2.7、1 件]。複数枚や編集タスクでも同じ形で返るかは未検証 [推定]
 - **`antigravity-implement` の helper は wrapper 終了直後に antigravity-verify の check を走らせる**。agent はリポジトリ内に何も書かないので、この自動検収は「変更なし」で通り、生成物の検収にはならない。生成物の受け取りは **helper 終了後に host が同梱の `antigravity-artifact` helper で行う**:
-  1. wrapper 出力から `ARTIFACT_PATH:` 行を取り出す(agent の報告なので信用せず、次の helper に検証させる)
-  2. `antigravity-artifact.ps1 import -Repo <repo> -Source <ARTIFACT_PATH> -Destination <repo 内のパス>`(bash は `antigravity-artifact.sh import --repo ... --source ... --destination ...`)を実行する。helper は、source の実体パスが `~/.gemini/antigravity-cli/brain/` 配下の通常ファイルであること(link は拒否)、magic bytes が PNG / JPEG であること、寸法が読めること、destination が repo 内で拡張子が内容と一致すること(変換はしない。JPEG は `.jpg` / `.jpeg`)、既存ファイルを `-Overwrite` なしで上書きしないこと、保護対象(`.git/`、`.env`、鍵)でないことを検査してから複製し、SHA-256 を照合して `[ANTIGRAVITY_ARTIFACT_OK] type=... width=... height=... bytes=... sha256=... source=... destination=...` を出す
-  3. PNG が必要なら import 後に host が変換する(helper は依存を増やさないため変換しない)
+  1. wrapper 出力から `ARTIFACT_PATH:` 行を取り出す(複数枚なら 1 行 1 パス。agent の報告なので信用せず、次の helper に検証させる)。wrapper が stderr に出す `ANTIGRAVITY: conversation_id=<id>` も控える(これは agy の JSON 出力由来で、agent の申告ではない)
+  2. スキル同梱の `<skill>/scripts/antigravity-artifact.ps1 import -Repo <repo> -ConversationId <id> -Source <ARTIFACT_PATH> -Destination <repo 内のパス>`(bash は `<skill>/scripts/antigravity-artifact.sh import --repo ... --conversation-id ... --source ... --destination ...`)を実行する。helper は、source の実体パスが `~/.gemini/antigravity-cli/brain/<conversation-id>/` 直下の通常ファイルであること(別会話の画像や link は拒否)、magic bytes が PNG / JPEG であること、寸法が読めること、destination が repo 内で拡張子が内容と一致すること、既存ファイルを `-Overwrite` なしで上書きしないこと、保護対象(`.git/`、`.env`、鍵)でないことを検査してから複製し、SHA-256 を照合して `[ANTIGRAVITY_ARTIFACT_OK] type=... width=... height=... bytes=... sha256=... source=... destination=...` を出す
+     - **destination の拡張子は `ARTIFACT_PATH` の実体(通常 `.jpg`)に合わせる**。PNG を意図した仕様書でも agy は JPEG を出すことが多く、`.png` を指定すると拡張子不一致で拒否される。helper は変換しない
+     - destination の親ディレクトリは helper 実行前に host が作っておく(helper は作らない)
+  3. PNG が必要なら `.jpg` で取り込んだ後に host が変換して置き換える(helper は依存を増やさないため変換しない)
   4. 3 節の目視を複製後のファイルに対して行い、`git status` で複製したファイルだけが untracked に現れることを確認する(agent 由来の変更が無いことは helper の自動検収で確認済み)
 - 1.1.1 時点の挙動(参考): 仕様書にリポジトリ内の絶対パスを書けば agent が sandbox + `--add-dir` 下で直接書き込めた [実測: 2026-07-10]。相対・曖昧な指定は scratch に落ちた。1.2.7 ではこの経路は headless では使えない
 
