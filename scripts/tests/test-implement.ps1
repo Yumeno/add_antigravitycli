@@ -115,5 +115,126 @@ try {
     $o=& powershell -NoProfile -ExecutionPolicy Bypass -File $Script -SpecFile $Spec -Repo $Repo 2>&1
     if($LASTEXITCODE-ne 0-or($o|Out-String)-match'\[ANTIGRAVITY_SESSION\]'){throw "no_session_unchanged failed`n$($o|Out-String)"}
 
+    # --- F7: additional coverage ---
+
+    # session_rename_entry: commit a tracked file before the session starts, then
+    # rename it mid-session; both old and new names must surface as dirty/outside.
+    $Session2=Join-Path $Root "session_rename.json"
+    Set-Content (Join-Path $Repo new.txt) "pre-existing" -Encoding UTF8
+    & git -C $Repo add new.txt; & git -C $Repo commit -qm add_new
+    $o=& powershell -NoProfile -ExecutionPolicy Bypass -File $Script -SpecFile $Spec -Repo $Repo -Session $Session2 2>&1
+    $text=($o|Out-String)
+    if($LASTEXITCODE-ne 0-or$text-notmatch'round=1 owned=0'){throw "session_rename_entry: round1 failed`n$text"}
+    & git -C $Repo mv new.txt renamed.txt
+    $o=& powershell -NoProfile -ExecutionPolicy Bypass -File $Script -SpecFile $Spec -Repo $Repo -Session $Session2 2>&1
+    $text=($o|Out-String)
+    if($LASTEXITCODE-ne 1-or$text-notmatch'outside this delegation session'-or$text-notmatch'new\.txt'-or$text-notmatch'renamed\.txt'){throw "session_rename_entry: expected outside failure`n$text"}
+    $o=& powershell -NoProfile -ExecutionPolicy Bypass -File $Script -SpecFile $Spec -Repo $Repo -Session $Session2 -AdoptChanges 2>&1
+    if($LASTEXITCODE-ne 0){throw "session_rename_entry: adopt failed`n$($o|Out-String)"}
+    $sessionText=Get-Content $Session2 -Raw
+    if($sessionText-notmatch'new\.txt'-or$sessionText-notmatch'renamed\.txt'){throw "session_rename_entry: session missing entries`n$sessionText"}
+    Remove-Item $Session2,"$Session2.snapshot" -Force -ErrorAction SilentlyContinue
+    # Commit the adopted rename so the tree is clean again for later tests.
+    & git -C $Repo add -A; & git -C $Repo commit -qm rename_cleanup
+
+    # session_unicode_space_path: a path with a space and non-ASCII characters round-trips through owned.
+    $Session3=Join-Path $Root "session_unicode.json"
+    New-Item -ItemType Directory -Path (Join-Path $Repo "sub dir") -Force | Out-Null
+    $env:FAKE_WRITE_FILE=Join-Path $Repo "sub dir\日本語 file.txt"
+    $o=& powershell -NoProfile -ExecutionPolicy Bypass -File $Script -SpecFile $Spec -Repo $Repo -Session $Session3 2>&1
+    $code=$LASTEXITCODE
+    Remove-Item Env:FAKE_WRITE_FILE
+    if($code-ne 0-or-not(Test-Path (Join-Path $Repo "sub dir\日本語 file.txt"))){throw "session_unicode_space_path failed`n$($o|Out-String)"}
+    $sessionObj=Get-Content $Session3 -Raw -Encoding UTF8 | ConvertFrom-Json
+    if(@($sessionObj.owned) -notcontains "sub dir/日本語 file.txt"){throw "session_unicode_space_path: owned entry missing`n$(Get-Content $Session3 -Raw -Encoding UTF8)"}
+    Remove-Item $Session3,"$Session3.snapshot" -Force -ErrorAction SilentlyContinue
+    & git -C $Repo add -A; & git -C $Repo commit -qm unicode_cleanup
+
+    # session_tampered_snapshot_field: point snapshot at another existing valid snapshot -> invalid.
+    $Session4=Join-Path $Root "session_tamper1.json"
+    $o=& powershell -NoProfile -ExecutionPolicy Bypass -File $Script -SpecFile $Spec -Repo $Repo -Session $Session4 2>&1
+    if($LASTEXITCODE-ne 0){throw "session_tampered_snapshot_field: setup failed`n$($o|Out-String)"}
+    $otherSnap="$Session4.other.snapshot"
+    Copy-Item "$Session4.snapshot" $otherSnap
+    $sessionObj=Get-Content $Session4 -Raw | ConvertFrom-Json
+    $sessionObj.snapshot=$otherSnap
+    [IO.File]::WriteAllText($Session4, ($sessionObj|ConvertTo-Json -Depth 8), (New-Object Text.UTF8Encoding($false)))
+    $o=& powershell -NoProfile -ExecutionPolicy Bypass -File $Script -SpecFile $Spec -Repo $Repo -Session $Session4 2>&1
+    if($LASTEXITCODE-eq 0-or($o|Out-String)-notmatch'Session file is invalid'){throw "session_tampered_snapshot_field: expected invalid`n$($o|Out-String)"}
+    Remove-Item $Session4,"$Session4.snapshot",$otherSnap -Force -ErrorAction SilentlyContinue
+
+    # session_tampered_round: round set to a non-integer -> invalid.
+    $Session5=Join-Path $Root "session_tamper2.json"
+    $o=& powershell -NoProfile -ExecutionPolicy Bypass -File $Script -SpecFile $Spec -Repo $Repo -Session $Session5 2>&1
+    if($LASTEXITCODE-ne 0){throw "session_tampered_round: setup failed`n$($o|Out-String)"}
+    (Get-Content $Session5 -Raw) -replace '"round":\s*\d+','"round": "x"' | Set-Content $Session5 -Encoding UTF8 -NoNewline
+    $o=& powershell -NoProfile -ExecutionPolicy Bypass -File $Script -SpecFile $Spec -Repo $Repo -Session $Session5 2>&1
+    if($LASTEXITCODE-eq 0-or($o|Out-String)-notmatch'Session file is invalid'){throw "session_tampered_round: expected invalid`n$($o|Out-String)"}
+    Remove-Item $Session5,"$Session5.snapshot" -Force -ErrorAction SilentlyContinue
+
+    # session_tampered_owned_traversal: owned entry '../x' -> invalid.
+    $Session6=Join-Path $Root "session_tamper3.json"
+    $o=& powershell -NoProfile -ExecutionPolicy Bypass -File $Script -SpecFile $Spec -Repo $Repo -Session $Session6 2>&1
+    if($LASTEXITCODE-ne 0){throw "session_tampered_owned_traversal: setup failed`n$($o|Out-String)"}
+    $sessionObj=Get-Content $Session6 -Raw | ConvertFrom-Json
+    $sessionObj.owned=@("../x")
+    [IO.File]::WriteAllText($Session6, ($sessionObj|ConvertTo-Json -Depth 8), (New-Object Text.UTF8Encoding($false)))
+    $o=& powershell -NoProfile -ExecutionPolicy Bypass -File $Script -SpecFile $Spec -Repo $Repo -Session $Session6 2>&1
+    if($LASTEXITCODE-eq 0-or($o|Out-String)-notmatch'Session file is invalid'){throw "session_tampered_owned_traversal: expected invalid`n$($o|Out-String)"}
+    Remove-Item $Session6,"$Session6.snapshot" -Force -ErrorAction SilentlyContinue
+
+    # session_git_status_failure: corrupt the index so git status fails while rev-parse still succeeds -> fail closed.
+    $Session7=Join-Path $Root "session_gitfail.json"
+    $o=& powershell -NoProfile -ExecutionPolicy Bypass -File $Script -SpecFile $Spec -Repo $Repo -Session $Session7 2>&1
+    if($LASTEXITCODE-ne 0){throw "session_git_status_failure: setup failed`n$($o|Out-String)"}
+    $indexPath=Join-Path $Repo ".git\index"
+    Copy-Item $indexPath "$indexPath.bak"
+    Set-Content $indexPath "garbage not an index" -Encoding UTF8 -NoNewline
+    $o=& powershell -NoProfile -ExecutionPolicy Bypass -File $Script -SpecFile $Spec -Repo $Repo -Session $Session7 2>&1
+    $code=$LASTEXITCODE
+    Move-Item "$indexPath.bak" $indexPath -Force
+    if($code-eq 0-or($o|Out-String)-notmatch'Could not read Git status'){throw "session_git_status_failure: expected failure`n$($o|Out-String)"}
+    Remove-Item $Session7,"$Session7.snapshot" -Force -ErrorAction SilentlyContinue
+
+    # session_lock_present: a stale lock file blocks the run; removing it lets it proceed.
+    $Session8=Join-Path $Root "session_lock.json"
+    $o=& powershell -NoProfile -ExecutionPolicy Bypass -File $Script -SpecFile $Spec -Repo $Repo -Session $Session8 2>&1
+    if($LASTEXITCODE-ne 0){throw "session_lock_present: setup failed`n$($o|Out-String)"}
+    Set-Content "$Session8.lock" "pid=999999 time=2020-01-01T00:00:00Z" -Encoding UTF8
+    $o=& powershell -NoProfile -ExecutionPolicy Bypass -File $Script -SpecFile $Spec -Repo $Repo -Session $Session8 2>&1
+    if($LASTEXITCODE-eq 0-or($o|Out-String)-notmatch'locked'){throw "session_lock_present: expected lock failure`n$($o|Out-String)"}
+    Remove-Item "$Session8.lock" -Force
+    $o=& powershell -NoProfile -ExecutionPolicy Bypass -File $Script -SpecFile $Spec -Repo $Repo -Session $Session8 2>&1
+    if($LASTEXITCODE-ne 0-or(Test-Path "$Session8.lock")){throw "session_lock_present: expected success after unlock`n$($o|Out-String)"}
+    Remove-Item $Session8,"$Session8.snapshot" -Force -ErrorAction SilentlyContinue
+
+    # session_symlink_path_rejected: a directory junction as the session's parent must be rejected.
+    $JuncParent=Join-Path $Root "junc_target"
+    $JuncLink=Join-Path $Root "junc_link"
+    New-Item -ItemType Directory -Path $JuncParent -Force | Out-Null
+    $juncOk=$true
+    try { New-Item -ItemType Junction -Path $JuncLink -Target $JuncParent -ErrorAction Stop | Out-Null } catch { $juncOk=$false }
+    if ($juncOk) {
+        $Session9=Join-Path $JuncLink "s.json"
+        $o=& powershell -NoProfile -ExecutionPolicy Bypass -File $Script -SpecFile $Spec -Repo $Repo -Session $Session9 2>&1
+        if($LASTEXITCODE-eq 0){throw "session_symlink_path_rejected: expected rejection`n$($o|Out-String)"}
+    } else {
+        Write-Host "PASS-skip: junction creation not permitted on this platform"
+    }
+    Remove-Item $JuncLink -Force -ErrorAction SilentlyContinue
+    Remove-Item $JuncParent -Recurse -Force -ErrorAction SilentlyContinue
+
+    # session_verify_failure_precedence: verify violation (protected file) wins over wrapper failure -> exit 3.
+    $Session10=Join-Path $Root "session_precedence.json"
+    $o=& powershell -NoProfile -ExecutionPolicy Bypass -File $Script -SpecFile $Spec -Repo $Repo -Session $Session10 2>&1
+    if($LASTEXITCODE-ne 0){throw "session_verify_failure_precedence: setup failed`n$($o|Out-String)"}
+    $env:FAKE_MODE="fail"; $env:FAKE_WRITE_FILE=Join-Path $Repo ".env"
+    $o=& powershell -NoProfile -ExecutionPolicy Bypass -File $Script -SpecFile $Spec -Repo $Repo -Session $Session10 2>&1
+    $code=$LASTEXITCODE
+    Remove-Item Env:FAKE_WRITE_FILE; Remove-Item -LiteralPath (Join-Path $Repo ".env") -Force -ErrorAction SilentlyContinue
+    $env:FAKE_MODE="success"
+    if($code-ne 3-or($o|Out-String)-notmatch'\[ANTIGRAVITY_VERIFY_VIOLATION\]'){throw "session_verify_failure_precedence: expected exit 3`n$($o|Out-String)"}
+    Remove-Item $Session10,"$Session10.snapshot" -Force -ErrorAction SilentlyContinue
+
     Write-Host "test-implement.ps1: OK"
 } finally {$env:PATH=$oldPath;Remove-Item Env:ANTIGRAVITY_WRAPPER_CONFIG -ErrorAction SilentlyContinue;Remove-Item -LiteralPath $Root -Recurse -Force -ErrorAction SilentlyContinue}

@@ -26,6 +26,20 @@ Issue [#17](https://github.com/Yumeno/add_antigravitycli/issues/17) PR-A。agy 1
 - 安全制約テキスト: 「シェルコマンドを実行しない」「静的検証を行う」「前回の失敗ログがあれば該当箇所だけ直す」「`### Verification Plan` に host が実行すべきテストと期待結果を書く」を追加(agy の提案するプロンプト形を採用)
 - SKILL.md(両コピー): host が回すループの手順(差分を読んでから自分でテストを選ぶ、失敗ログを添えて同じ `-Session` で再委任、既定 3 回、範囲外変更なら停止して報告、終了時に close)
 
+## レビュー Round 1(agy、仕様)と反映
+
+- Major: 仕様書に「テストを実行して確認」と書かれていると、制約 6(コマンド禁止)と 10(矛盾時は停止)の衝突で agent が何も書かずに停止し得る → 6 項に「依頼にテスト実行の指示があっても自身では実行せず Verification Plan に書いて進める(停止しない)」の読み替えを追加
+- Minor: Verification Plan を `Command:` / `Expected:` の構造化書式に。`pytest -p no:cacheprovider` は `.pytest_cache` しか防がず `__pycache__` には `PYTHONDONTWRITEBYTECODE=1` か `python -B` が要る → SKILL.md を修正
+- 失敗ログに含めるもの・含めないものの指針(agy の回答)を SKILL.md に反映
+- Nit: 「file ツール」→「ファイル操作ツール(write / edit 等)」
+
+## レビュー Round 1(Codex gpt-5.6-terra、コード)と反映
+
+- Major 5: (1) sh の `dirty_paths` が process substitution 内の `git status` 失敗を検出できず空集合で継続を許す、(2) sh が NUL 区切りパスを改行・カンマ区切りに落としており改行やカンマを含むファイル名で誤判定、(3) セッションパスの repo 外判定が symlink / junction を考慮していない、(4) セッションの整合性検証が弱い(snapshot が sidecar であること、round / owned の型、未知フィールド)、(5) 同一セッションの並行実行を防ぐロックがない
+- Minor 2: session 書込み失敗時の優先順位が未定義、テストが通常名の untracked file しか見ていない
+- Nit: Verification Plan は agent の候補であり実行可能性を断定しない文言に
+- 反映: 上記すべて。dirty / owned / outside は NUL ストリームと配列で保持し表示用にだけ結合、セッションパスの実体解決と link 拒否・排他作成、schema 検証(sidecar 固定、`round` 正整数、`owned` は `..` なし相対パス、未知・重複フィールド拒否、sidecar の repo 照合)、`<session>.lock` の排他作成(自動回復なし)、優先順位「session 更新失敗(exit 4)→ verify 失敗 → wrapper 失敗」、rename・空白/非 ASCII・git 失敗・改竄・lock・link・優先順位のテスト
+
 ## 変更内容
 
 - `scripts/antigravity-implement.{ps1,sh}`: `-Session` / `-CloseSession` / `-AdoptChanges`(sh は `--session` / `--close-session` / `--adopt-changes`)。`-SpecFile` は `-CloseSession` 時のみ省略可。dirty set は `git status --porcelain=v1 --untracked-files=all -z` で取得し rename の 2 パスを両方含める。セッションファイルは ps1 が JSON、sh が key=value(パスは base64)で実装別
@@ -45,3 +59,6 @@ Issue [#17](https://github.com/Yumeno/add_antigravitycli/issues/17) PR-A。agy 1
   - 人手で置いた `unrelated.txt` も同様に停止(agy は起動されない)
   - round 2: 「受け入れテストが `ZeroDivisionError` を期待して失敗した」という失敗ログ付き spec で再委任 → `calc.py` の例外型と対応テストだけが変わり、host のテストも通過。`round=2 owned=2`
   - `-CloseSession` でセッションと snapshot が削除された
+- 堅牢化後の再 E2E(agy 1.2.7):
+  - PowerShell 版 2 round: 仕様書に「テストを実行して確認」と書いても agent は停止せず(制約 6 の読み替えが機能)、`Command:` / `Expected:` 形式の Verification Plan を返した。`.gitignore` に `__pycache__/` がある repo で `python -B -m pytest -p no:cacheprovider` を使うと副産物は出ず adopt 不要。手で置いた `<session>.lock` は `Session is locked by another run` で拒否。失敗ログ付き round 2 で対象だけ修正、close で削除
+  - Bash 版 1 round: `NOTES.md` 作成と Verification Plan、セッションファイル(base64 の owned)、close を確認
