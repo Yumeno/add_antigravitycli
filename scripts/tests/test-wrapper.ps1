@@ -11,6 +11,15 @@ function Run([string[]]$Arguments) {
     $o=& powershell -NoProfile -ExecutionPolicy Bypass -File $Wrapper @Arguments 2>&1
     return @{Code=$LASTEXITCODE; Text=($o|Out-String)}
 }
+function RunBytes([string[]]$Arguments) {
+    $outFile = Join-Path $Root ("bytes_out_" + [guid]::NewGuid().ToString("N") + ".txt")
+    $errFile = Join-Path $Root ("bytes_err_" + [guid]::NewGuid().ToString("N") + ".txt")
+    $allArgs = @("-NoProfile","-ExecutionPolicy","Bypass","-File",$Wrapper) + $Arguments
+    $p = Start-Process -FilePath "powershell" -ArgumentList $allArgs -RedirectStandardOutput $outFile -RedirectStandardError $errFile -Wait -PassThru -NoNewWindow
+    $bytes = if (Test-Path -LiteralPath $outFile) { [IO.File]::ReadAllBytes($outFile) } else { [byte[]]@() }
+    Remove-Item -LiteralPath $outFile,$errFile -ErrorAction SilentlyContinue
+    return @{Code=$p.ExitCode; Bytes=$bytes}
+}
 function RunSplit([string[]]$Arguments) {
     $outFile = Join-Path $Root ("split_out_" + [guid]::NewGuid().ToString("N") + ".txt")
     $errFile = Join-Path $Root ("split_err_" + [guid]::NewGuid().ToString("N") + ".txt")
@@ -209,9 +218,11 @@ try {
         $crlfFile=Join-Path $Root "crlf_response.txt"
         [IO.File]::WriteAllText($crlfFile,"line1`r`nline2`n`n`n",(New-Object Text.UTF8Encoding($false)))
         $env:FAKE_RESPONSE_FILE=$crlfFile
-        $r=Run @("-Prompt","x")
+        $r=RunBytes @("-Prompt","x")
         Remove-Item Env:FAKE_RESPONSE_FILE -ErrorAction SilentlyContinue
-        if($r.Code-ne 0-or$r.Text-notmatch'line1'-or$r.Text-notmatch'line2'){throw $r.Text}
+        $expected=[IO.File]::ReadAllBytes($crlfFile)
+        if($r.Code-ne 0){throw "exit $($r.Code)"}
+        if(-not [Linq.Enumerable]::SequenceEqual([byte[]]$r.Bytes,[byte[]]$expected)){throw ("stdout bytes differ: got " + (($r.Bytes|ForEach-Object{'{0:x2}' -f $_}) -join ' '))}
     }
 } finally {
     $env:PATH=$oldPath; Remove-Item Env:ANTIGRAVITY_WRAPPER_MODEL -ErrorAction SilentlyContinue

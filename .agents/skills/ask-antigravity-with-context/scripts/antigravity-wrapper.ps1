@@ -301,11 +301,14 @@ try {
     } elseif ([string]::IsNullOrWhiteSpace($response)) {
         Fail 1 "agy returned empty output.$(Get-StderrTail)"
     } else {
-        Write-Output $response.TrimEnd()
+        # Write the response bytes as-is (same contract as antigravity-wrapper.sh: trailing newlines and CRLF preserved).
+        [Console]::Out.Write($response)
         if ($deniedList.Count) {
-            Write-Output "[ANTIGRAVITY_DENIED_ACTIONS] $deniedText"
+            if (-not $response.EndsWith("`n")) { [Console]::Out.Write("`n") }
+            [Console]::Out.Write("[ANTIGRAVITY_DENIED_ACTIONS] $deniedText`n")
             [Console]::Error.WriteLine("[ANTIGRAVITY_DENIED_ACTIONS] $deniedText")
         }
+        [Console]::Out.Flush()
     }
     if ($OwnedMediaDir) { Remove-Item -LiteralPath $OwnedMediaDir -Recurse -Force; $OwnedMediaDir = "" }
     if ($OwnedWorkDir) { Remove-Item -LiteralPath $OwnedWorkDir -Recurse -Force; $OwnedWorkDir = "" }

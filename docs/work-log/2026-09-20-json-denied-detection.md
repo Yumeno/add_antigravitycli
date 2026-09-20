@@ -52,6 +52,11 @@ Issue [#14](https://github.com/Yumeno/add_antigravitycli/issues/14) の対応。
 ` に書き換える(複数行 `response` が壊れる)。jq 経路は `@base64` で取り出して `base64 -d` で復号する方式に変更し、CRLF・末尾複数改行を含む往復でバイト一致を確認
 - fake-agy.ps1 は `[Console]::OutputEncoding` を UTF-8 にしないと cp932 で JSON を書いて日本語が壊れる(大サイズ日本語テストで顕在化)。テスト側の修正
 
+## レビュー Round 2 と反映
+
+- agy(仕様): NO MAJOR FINDINGS / CONVERGED
+- Codex gpt-5.6-terra(コード): Major 1(PS 版の成功時出力が `TrimEnd` + `Write-Output` で末尾改行・CRLF を保持せず、Bash 版と契約が不一致)→ `[Console]::Out.Write` でバイト列をそのまま出力し、拒否行を続けるときだけ LF を補う形に修正。PS 側の CRLF テストも stdout をバイトで読んで入力と完全一致を検証するよう変更。従来の PS 版(`$stdout.TrimEnd()`)からの挙動変更: 末尾の空白・改行が保持される
+
 ## 検証
 
 - unit: test-wrapper.ps1 27/27、test-wrapper.sh 24/24、test-implement.ps1 OK、test-implement.sh 4/4、test-verify.ps1 OK、test-skill-bundles.ps1 OK、sync -Check 同期済み
