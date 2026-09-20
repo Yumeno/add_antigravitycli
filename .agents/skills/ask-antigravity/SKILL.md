@@ -23,7 +23,7 @@ powershell -ExecutionPolicy Bypass -NoProfile -File "<解決したscripts>\antig
 bash "<解決したscripts>/antigravity-wrapper.sh" --prompt "質問"
 ```
 
-5. wrapperが返す失敗sentinelをAntigravityの回答として扱わず、呼び出し失敗として提示する。
+5. wrapperが返す失敗sentinelをAntigravityの回答として扱わず、呼び出し失敗として提示する。`[ANTIGRAVITY_DENIED_ACTIONS]` 行は、agentが承認の要るtoolを使おうとして非対話実行のため自動拒否されたことを示す。回答が空で失敗した場合は「toolを使わず知識だけで答える」を指示に加えて再実行する。
 6. 成功時は回答を「Antigravity CLIの回答」として引用し、必要なら自身の見解との差分を短く補足する。
 
 wrapperはAntigravity CLIのboolean `--sandbox` を常に有効化する。sandboxへmode値を渡そうとしない。

@@ -205,7 +205,7 @@ try { $agy = (Get-Command agy -ErrorAction Stop).Source } catch { Fail 1 "'agy' 
 $resolvedWorkDir = (Resolve-Path -LiteralPath $WorkDir).Path
 $agyArgs = @(
     "--print-timeout", ("{0}s" -f $Timeout),
-    "--disable-slash-commands", "--sandbox", "--new-project", "--add-dir", $resolvedWorkDir
+    "--disable-slash-commands", "--output-format", "json", "--sandbox", "--new-project", "--add-dir", $resolvedWorkDir
 )
 if ($OwnedMediaDir) { $agyArgs += @("--add-dir", $OwnedMediaDir) }
 if ($Model) { $agyArgs += @("--model", $Model); [Console]::Error.WriteLine("MODEL: $Model") }
@@ -243,7 +243,36 @@ try {
     $stderr = $stderrTask.Result
     if ($process.ExitCode -ne 0) { Fail $process.ExitCode "agy exited with status $($process.ExitCode). $($stderr.Trim())" }
     if ([string]::IsNullOrWhiteSpace($stdout)) { Fail 1 "agy returned empty output." }
-    Write-Output $stdout.TrimEnd()
+    $obj = $null
+    try { $obj = $stdout | ConvertFrom-Json -ErrorAction Stop } catch { $obj = $null }
+    if (-not $obj -or -not ($obj.PSObject.Properties['status'])) {
+        $snippet = $stdout.Substring(0, [Math]::Min(500, $stdout.Length))
+        Fail 1 "agy returned unparseable output.`n$snippet"
+    }
+    $status = $obj.status
+    $response = if ($obj.PSObject.Properties['response']) { [string]$obj.response } else { "" }
+    $deniedList = @()
+    if ($obj.PSObject.Properties['denied_actions'] -and $obj.denied_actions) {
+        foreach ($d in $obj.denied_actions) { $deniedList += "$($d.action) ($($d.display_name))" }
+    }
+    $deniedText = $deniedList -join ", "
+    if ($deniedList.Count) { [Console]::Error.WriteLine("ANTIGRAVITY: denied_actions=$deniedText") }
+    if ($status -ne "SUCCESS") {
+        $extra = ""
+        if ($deniedList.Count) { $extra += "`n[ANTIGRAVITY_DENIED_ACTIONS] $deniedText" }
+        if (-not [string]::IsNullOrWhiteSpace($response)) { $extra += "`n" + $response.TrimEnd() }
+        Fail 1 "agy reported status $status.$extra"
+    } elseif ([string]::IsNullOrWhiteSpace($response) -and $deniedList.Count) {
+        Fail 1 "agy produced no response because tool permissions were denied in headless mode.`n[ANTIGRAVITY_DENIED_ACTIONS] $deniedText"
+    } elseif ([string]::IsNullOrWhiteSpace($response)) {
+        Fail 1 "agy returned empty output."
+    } else {
+        Write-Output $response.TrimEnd()
+        if ($deniedList.Count) {
+            Write-Output "[ANTIGRAVITY_DENIED_ACTIONS] $deniedText"
+            [Console]::Error.WriteLine("[ANTIGRAVITY_DENIED_ACTIONS] $deniedText")
+        }
+    }
     if ($OwnedMediaDir) { Remove-Item -LiteralPath $OwnedMediaDir -Recurse -Force; $OwnedMediaDir = "" }
     if ($OwnedWorkDir) { Remove-Item -LiteralPath $OwnedWorkDir -Recurse -Force; $OwnedWorkDir = "" }
 } catch { Fail 1 $_.Exception.Message }

@@ -25,7 +25,7 @@ bash "<解決したscripts>/antigravity-wrapper.sh" --prompt "$ARGUMENTS" --cont
 
 bashでは`--attachment`を必要な数だけ順序どおり反復する。
 
-5. 回答と失敗sentinelを区別し、自身でも指摘を検証する。
+5. 回答と失敗sentinelを区別し、自身でも指摘を検証する。`[ANTIGRAVITY_DENIED_ACTIONS]` 行は承認の要るtool(シェルコマンド等)が非対話実行で自動拒否されたことを示す。回答があれば拒否工程を併記し、回答が空で失敗したら「toolを使わずコンテキストだけで答える」を指示に加えて再実行する。
 6. 自分が作った一時ファイルだけを削除する。
 
 wrapperはboolean `--sandbox` を常に有効化するため、sandboxへmode値を渡さない。

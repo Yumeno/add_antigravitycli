@@ -27,7 +27,8 @@ t_args() {
         ! grep -qx -- '--print' "$ROOT/argv" && grep -qx -- '--print-timeout' "$ROOT/argv" &&
         grep -qx -- '9s' "$ROOT/argv" && grep -qx -- 'gemini/test' "$ROOT/argv" &&
         grep -qx -- '--sandbox' "$ROOT/argv" && grep -qx -- '--disable-slash-commands' "$ROOT/argv" && grep -qx -- '--new-project' "$ROOT/argv" &&
-        grep -qx -- '--add-dir' "$ROOT/argv"
+        grep -qx -- '--add-dir' "$ROOT/argv" &&
+        grep -qx -- '--output-format' "$ROOT/argv" && grep -qx -- 'json' "$ROOT/argv"
 }
 t_media() {
     export FAKE_AGY_OUTPUT=ok
@@ -81,6 +82,50 @@ t_timeout() {
     unset FAKE_AGY_SLEEP
     [[ $code -eq 2 && "$out" == *'timed out'* ]]
 }
+t_denied_empty_response() {
+    export FAKE_AGY_OUTPUT='' FAKE_AGY_DENIED='escalate_admin:Bash'
+    set +e; out="$(PATH="$ROOT/bin:$PATH" bash "$WRAPPER" --prompt hi 2>/dev/null)"; code=$?; set -e
+    unset FAKE_AGY_DENIED
+    [[ $code -eq 1 && "$out" == *'permissions were denied'* && "$out" == *'[ANTIGRAVITY_DENIED_ACTIONS] escalate_admin (Bash)'* ]]
+}
+t_denied_with_response() {
+    export FAKE_AGY_OUTPUT='fake response' FAKE_AGY_DENIED='command:Bash'
+    set +e; out="$(PATH="$ROOT/bin:$PATH" bash "$WRAPPER" --prompt hi 2>/dev/null)"; code=$?; set -e
+    unset FAKE_AGY_DENIED
+    [[ $code -eq 0 ]] || return 1
+    response_pos="${out%%fake response*}"; [[ "$response_pos" != "$out" ]] || return 1
+    denied_pos="${out%%\[ANTIGRAVITY_DENIED_ACTIONS\] command \(Bash\)*}"; [[ "$denied_pos" != "$out" ]] || return 1
+    [[ "${#response_pos}" -lt "${#denied_pos}" ]]
+}
+t_non_success_status() {
+    export FAKE_AGY_OUTPUT='fake response' FAKE_AGY_STATUS='ERROR'
+    set +e; out="$(PATH="$ROOT/bin:$PATH" bash "$WRAPPER" --prompt hi 2>/dev/null)"; code=$?; set -e
+    unset FAKE_AGY_STATUS
+    [[ $code -eq 1 && "$out" == *'status ERROR'* ]]
+}
+t_unparseable_output() {
+    export FAKE_AGY_RAW='not json at all'
+    set +e; out="$(PATH="$ROOT/bin:$PATH" bash "$WRAPPER" --prompt hi 2>/dev/null)"; code=$?; set -e
+    unset FAKE_AGY_RAW
+    [[ $code -eq 1 && "$out" == *'unparseable'* && "$out" == *'not json at all'* ]]
+}
+t_raw_empty() {
+    export FAKE_AGY_RAW_EMPTY=1
+    set +e; out="$(PATH="$ROOT/bin:$PATH" bash "$WRAPPER" --prompt hi 2>/dev/null)"; code=$?; set -e
+    unset FAKE_AGY_RAW_EMPTY
+    [[ $code -eq 1 && "$out" == *'empty output'* ]]
+}
+t_no_parser_fallback() {
+    export FAKE_AGY_OUTPUT=ok ANTIGRAVITY_WRAPPER_JSON_TOOL=none
+    set +e
+    out="$(PATH="$ROOT/bin:$PATH" bash "$WRAPPER" --prompt hi 2>"$ROOT/no_parser_err")"
+    code=$?
+    set -e
+    unset ANTIGRAVITY_WRAPPER_JSON_TOOL
+    [[ $code -eq 0 && "$out" == *'ok'* ]] || return 1
+    ! grep -qx -- '--output-format' "$ROOT/argv" || return 1
+    grep -qF 'denied-action detection disabled' "$ROOT/no_parser_err"
+}
 check stdin_is_not_argv t_stdin
 check expected_cli_arguments t_args
 check ordered_mixed_media_staging t_media
@@ -90,5 +135,11 @@ check dangerous_requires_double_opt_in t_danger
 check invalid_media_cleanup t_invalid_media_cleanup
 check model_resolution t_model
 check parent_timeout t_timeout
+check denied_empty_response t_denied_empty_response
+check denied_with_response t_denied_with_response
+check non_success_status t_non_success_status
+check unparseable_output t_unparseable_output
+check raw_empty t_raw_empty
+check no_parser_fallback t_no_parser_fallback
 printf 'Passed: %d / %d\n' "$passed" "$total"
 [[ "$passed" -eq "$total" ]]

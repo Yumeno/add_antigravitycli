@@ -17,4 +17,4 @@ powershell -ExecutionPolicy Bypass -NoProfile -File "<解決したscripts>/antig
 bash "<解決したscripts>/antigravity-wrapper.sh" --prompt "$ARGUMENTS"
 ```
 
-失敗sentinelを回答として扱わない。成功時は「Antigravity CLIの回答」として提示する。wrapperはboolean `--sandbox` を常に有効化するため、sandboxへmode値を渡さない。モデル名はユーザーが指定した場合だけ渡す。ファイルやdiffを送る場合は `/ask-antigravity-with-context` を使う。
+失敗sentinelを回答として扱わない。`[ANTIGRAVITY_DENIED_ACTIONS]` 行は承認の要るtoolが非対話実行で自動拒否されたことを示し、回答が空で失敗したら「toolを使わず知識だけで答える」を指示に加えて再実行する。成功時は「Antigravity CLIの回答」として提示する。wrapperはboolean `--sandbox` を常に有効化するため、sandboxへmode値を渡さない。モデル名はユーザーが指定した場合だけ渡す。ファイルやdiffを送る場合は `/ask-antigravity-with-context` を使う。
