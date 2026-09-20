@@ -36,7 +36,7 @@ Issue [#17](https://github.com/Yumeno/add_antigravitycli/issues/17) PR-B。agy 1
 
 - agy(仕様): NO MAJOR FINDINGS / CONVERGED。JSON の `conversation_id` と `brain/<id>/` は 1:1 で同一と確認
 - Codex gpt-5.6-terra(コード): Major 1(PowerShell 版で destination に NTFS 代替データストリーム `.git:artifact.png` を指定でき保護判定を迂回)→ 両版で、ドライブ指定以外の `:` を含む destination と Windows の予約デバイス名(`CON` / `NUL` / `COM1` 等)をパス解決前に拒否。テスト 2 件追加(両版 30/30)
-- Codex Round 3: Major 1(`NUL.foo.png` のような複数ドット名が予約名検査を通る)→ 最初の `.` より前を予約名として判定し、末尾の `.` / 空白も拒否。テストに `nul.foo.png` と `COM1.x.PNG` を追加
+- Codex Round 3: Major 1(`NUL.foo.png` のような複数ドット名が予約名検査を通る)→ 最初の `.` より前を予約名として判定し、末尾の `.` / 空白も拒否。テストに `nul.foo.png` と `COM1.x.PNG` を追加 → Round 4 で NO MAJOR FINDINGS / CONVERGED
 
 ## 変更内容
 
@@ -49,6 +49,6 @@ Issue [#17](https://github.com/Yumeno/add_antigravitycli/issues/17) PR-B。agy 1
 
 ## 検証
 
-- unit: test-artifact.ps1 28/28、test-artifact.sh 28/28、test-wrapper.ps1 28/28、test-wrapper.sh 25/25、test-install 3 種(ps1 各 12/12、sh 各 7 PASS + 2 SKIP)、test-implement 両版、test-skill-bundles OK、sync -Check 同期済み。symlink 拒否の分岐は Windows で link を作れず PASS-skip(ロジックのみ)
+- unit: test-artifact.ps1 30/30、test-artifact.sh 30/30、test-wrapper.ps1 28/28、test-wrapper.sh 25/25、test-install 3 種(ps1 各 12/12、sh 各 7 PASS + 2 SKIP)、test-implement 両版、test-skill-bundles OK、sync -Check 同期済み。symlink 拒否の分岐は Windows で link を作れず PASS-skip(ロジックのみ)
 - 実 agy 1.2.7 E2E: 紙飛行機アイコン(1:1)を生成させ `ARTIFACT_PATH:` を取得 → PowerShell 版 import で `type=jpeg width=1024 height=1024 bytes=329028` と SHA-256 付きの OK、`.png` 指定は拡張子不一致で拒否、既存への再取り込みは `-Overwrite` なしで拒否 → Bash 版 import も同じ SHA-256 で OK、brain 外の source は拒否。3 ファイル(source と両複製)の SHA-256 一致、目視 OK
 - Round 1 反映後の再 E2E: 灯台アイコンを生成 → wrapper の stderr `ANTIGRAVITY: conversation_id=...` を host が控える → その ID で PowerShell / Bash 両 helper の import が OK(同じ SHA-256)、別の ID を渡すと拒否
