@@ -116,6 +116,6 @@ try {
         else { $violations.Add("protected change: $p") }
     }
     if ($violations.Count) { $violations | ForEach-Object { Write-Output "[ANTIGRAVITY_VERIFY_VIOLATION] $_" }; exit 3 }
-    Write-Output "[ANTIGRAVITY_VERIFY_OK] no unapproved changes"; exit 0
+    Write-Output "[ANTIGRAVITY_VERIFY_OK] git state and protected files check passed"; exit 0
 } catch { Fail $_.Exception.Message 2 }
 

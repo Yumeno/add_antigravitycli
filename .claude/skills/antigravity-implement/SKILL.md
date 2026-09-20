@@ -10,9 +10,9 @@ allowed-tools: Bash Read Grep Glob
 `$ARGUMENTS` を実装指示として使う。質問やレビューから自動起動しない。
 
 1. 対象がGitリポジトリか確認する。
-2. `git status --short` がcleanでなければ停止する。stash、reset、checkoutを行わない。
+2. `git status --short` がcleanでなければ停止する。stash、reset、checkoutを行わない（同一セッションの2回目以降は下記の継続委任を使う）。
 3. `HEAD`、ブランチ、statusを記録する。
-4. 変更範囲、禁止範囲、受け入れ条件、テストをUTF-8の一時仕様ファイルへ明記する。
+4. 変更範囲、禁止範囲、受け入れ条件、テストをUTF-8の一時仕様ファイルへ明記する。agentはシェルコマンド（テスト・ビルド・git）を実行できない前提で書く（agy 1.2.7 の非対話実行では自動拒否。安全制約テキストで禁止済み）。テストは自分が実行する。
 5. commit、push、PR、依存追加、破壊的操作を許可しない。dangerous flagや承認回避フラグは既定で禁止する。
 6. この `SKILL.md` のディレクトリ（通常 `$CLAUDE_SKILL_DIR`）直下の `scripts/` を絶対パスへ解決し、同梱されたhelperを単独コマンドで呼ぶ。現在の作業ディレクトリや共通 `$HOME/scripts` を前提にしない。
 
@@ -28,7 +28,8 @@ bash "<解決したscripts>/antigravity-implement.sh" --spec-file "/absolute/spe
 
 bashでは`--attachment`を必要な数だけ順序どおり反復する。
 
-7. 成功申告を信用せず、`git status --short`、`git diff --stat`、`git diff` と受け入れテストを自分で確認する。
+7. 成功申告を信用せず、`git status --short`、`git diff --stat`、`git diff` と受け入れテストを自分で確認する。agentの `### Verification Plan` は提案にすぎない。差分を読んでから実行するテストを自分で選ぶ。
+10. 継続委任: 1回目は `-Session <リポジトリ外のパス>`（bashは `--session`）を付けて実行する。テストが失敗したら、失敗ログの要点と「この失敗だけを直す」旨の新しい仕様ファイルで同じ `-Session` を付けて再実行する。helperはworking treeの変更がセッション記録の範囲内かを確認し、範囲外なら一覧を出して停止する。自分のテスト実行の副産物（`__pycache__` 等）が原因なら一覧を確認して `-AdoptChanges`（`--adopt-changes`）で取り込み、それ以外は取り込まずstashやresetもせず報告する。反復は既定3回まで。終了時に `-Session <path> -CloseSession`（`--close-session`）で削除する。`-Session` なしは従来どおりの単発実行。
 8. 依頼外変更、秘密情報、生成物、依存追加、危険なコマンド、テスト弱体化を検査し、変更ファイル、テスト結果、残課題を報告する。問題があっても無断で変更を破棄しない。
 9. 自分が作成した一時仕様ファイルだけを削除する。
 
