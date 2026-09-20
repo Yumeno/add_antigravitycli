@@ -188,7 +188,8 @@ try {
     $destName = Split-Path -Leaf $destFull
     # NTFS alternate data streams (".git:x.png") and reserved device names would bypass the
     # protected-path and extension checks below and are never a valid regular-file destination.
-    if ([IO.Path]::GetFileNameWithoutExtension($destName) -match '^(?i)(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$') { Fail "Destination name is a reserved device name: $destName" }
+    # Windows treats the part before the FIRST dot as the device name (NUL.foo.png is NUL); trailing dots/spaces are stripped by Win32.
+    if (($destName -split '\.',2)[0] -match '^(?i)(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$' -or $destName -match '[. ]$') { Fail "Destination name is a reserved device name or ends with a dot/space: $destName" }
     $destResolved = Join-Path $destParentReal $destName
     $rootPrefix = $root.TrimEnd("\","/") + [IO.Path]::DirectorySeparatorChar
     if (-not $destResolved.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {

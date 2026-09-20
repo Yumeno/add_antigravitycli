@@ -246,6 +246,10 @@ try {
     Test-Case "reserved_device_name_rejected" {
         $r = Invoke-Artifact @("import","-Repo",$Repo,"-ConversationId","conv1","-Source",(Join-Path $Conv "img.png"),"-Destination",(Join-Path $Repo "nul.png"))
         if ($r.Code -eq 0 -or $r.Output -notmatch "reserved device name") { throw $r.Output }
+        $r = Invoke-Artifact @("import","-Repo",$Repo,"-ConversationId","conv1","-Source",(Join-Path $Conv "img.png"),"-Destination",(Join-Path $Repo "nul.foo.png"))
+        if ($r.Code -eq 0 -or $r.Output -notmatch "reserved device name") { throw $r.Output }
+        $r = Invoke-Artifact @("import","-Repo",$Repo,"-ConversationId","conv1","-Source",(Join-Path $Conv "img.png"),"-Destination",(Join-Path $Repo "COM1.x.PNG"))
+        if ($r.Code -eq 0 -or $r.Output -notmatch "reserved device name") { throw $r.Output }
     }
 
     Test-Case "git_dir_case_variant_rejected" {

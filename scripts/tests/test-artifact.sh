@@ -222,6 +222,10 @@ t_ads_destination_rejected() {
 t_reserved_device_name_rejected() {
     new_fixtures
     run_artifact import --repo "$REPO" --conversation-id conv1 --source "$CONV/img.png" --destination "$REPO/nul.png"
+    [[ $code -ne 0 && "$output" == *'reserved device name'* ]] || return 1
+    run_artifact import --repo "$REPO" --conversation-id conv1 --source "$CONV/img.png" --destination "$REPO/nul.foo.png"
+    [[ $code -ne 0 && "$output" == *'reserved device name'* ]] || return 1
+    run_artifact import --repo "$REPO" --conversation-id conv1 --source "$CONV/img.png" --destination "$REPO/COM1.x.PNG"
     [[ $code -ne 0 && "$output" == *'reserved device name'* ]]
 }
 t_overwrite_failure_keeps_original() {

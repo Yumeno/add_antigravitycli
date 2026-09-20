@@ -190,8 +190,10 @@ DEST_REL="${DEST_RESOLVED#"$ROOT"/}"
 # protected-path and extension checks and are never a valid regular-file destination.
 DEST_LEAF="${DEST_REL##*/}"
 case "$DEST_LEAF" in *:*) die "Destination name must not contain ':' (alternate data stream): $DEST_LEAF" ;; esac
-DEST_STEM="$(printf '%s' "${DEST_LEAF%.*}" | LC_ALL=C tr '[:lower:]' '[:upper:]')"
-case "$DEST_STEM" in CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9]) die "Destination name is a reserved device name: $DEST_LEAF" ;; esac
+# Windows treats the part before the FIRST dot as the device name (NUL.foo.png is NUL); trailing dots/spaces are stripped by Win32.
+DEST_STEM="$(printf '%s' "${DEST_LEAF%%.*}" | LC_ALL=C tr '[:lower:]' '[:upper:]')"
+case "$DEST_STEM" in CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9]) die "Destination name is a reserved device name or ends with a dot/space: $DEST_LEAF" ;; esac
+case "$DEST_LEAF" in *.|*' ') die "Destination name is a reserved device name or ends with a dot/space: $DEST_LEAF" ;; esac
 
 # Protected-path and extension checks are case-insensitive: normalize with LC_ALL=C tr so
 # the comparison does not depend on locale-specific case folding.

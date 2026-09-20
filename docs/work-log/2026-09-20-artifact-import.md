@@ -36,6 +36,7 @@ Issue [#17](https://github.com/Yumeno/add_antigravitycli/issues/17) PR-B。agy 1
 
 - agy(仕様): NO MAJOR FINDINGS / CONVERGED。JSON の `conversation_id` と `brain/<id>/` は 1:1 で同一と確認
 - Codex gpt-5.6-terra(コード): Major 1(PowerShell 版で destination に NTFS 代替データストリーム `.git:artifact.png` を指定でき保護判定を迂回)→ 両版で、ドライブ指定以外の `:` を含む destination と Windows の予約デバイス名(`CON` / `NUL` / `COM1` 等)をパス解決前に拒否。テスト 2 件追加(両版 30/30)
+- Codex Round 3: Major 1(`NUL.foo.png` のような複数ドット名が予約名検査を通る)→ 最初の `.` より前を予約名として判定し、末尾の `.` / 空白も拒否。テストに `nul.foo.png` と `COM1.x.PNG` を追加
 
 ## 変更内容
 
