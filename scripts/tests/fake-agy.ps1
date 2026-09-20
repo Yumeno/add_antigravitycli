@@ -10,8 +10,23 @@ if ($env:FAKE_WRITE_FILE) { [IO.File]::WriteAllText($env:FAKE_WRITE_FILE, "fake 
 if ($env:FAKE_STDERR) { [Console]::Error.WriteLine($env:FAKE_STDERR) }
 
 $useJson = $false
+$useStream = $false
 for ($i = 0; $i -lt $Arguments.Count - 1; $i++) {
     if ($Arguments[$i] -eq "--output-format" -and $Arguments[$i + 1] -eq "json") { $useJson = $true; break }
+    if ($Arguments[$i] -eq "--output-format" -and $Arguments[$i + 1] -eq "stream-json") { $useStream = $true; break }
+}
+
+function Get-DeniedActions {
+    if (-not $env:FAKE_DENIED) { return $null }
+    $pairs = @($env:FAKE_DENIED -split ',' | ForEach-Object {
+        $parts = $_ -split ':', 2
+        [ordered]@{ action = $parts[0]; display_name = $parts[1] }
+    })
+    switch ($env:FAKE_DENIED_SHAPE) {
+        "object" { return $pairs[0] }
+        "number" { return 42 }
+        default { return $pairs }
+    }
 }
 
 function Write-JsonEnvelope([string]$Response) {
@@ -23,20 +38,58 @@ function Write-JsonEnvelope([string]$Response) {
         response = $Response
         num_turns = 1
     }
-    if ($env:FAKE_DENIED) {
-        $pairs = @($env:FAKE_DENIED -split ',' | ForEach-Object {
-            $parts = $_ -split ':', 2
-            [ordered]@{ action = $parts[0]; display_name = $parts[1] }
-        })
-        switch ($env:FAKE_DENIED_SHAPE) {
-            "object" { $data.denied_actions = $pairs[0] }
-            "number" { $data.denied_actions = 42 }
-            default { $data.denied_actions = $pairs }
-        }
-    }
+    $denied = Get-DeniedActions
+    if ($null -ne $denied) { $data.denied_actions = $denied }
     $json = $data | ConvertTo-Json -Compress -Depth 5
     [Console]::Out.Write($json)
     [Console]::Out.Write("`n")
+}
+
+function Write-Line([hashtable]$Obj) {
+    $json = $Obj | ConvertTo-Json -Compress -Depth 8
+    [Console]::Out.Write($json)
+    [Console]::Out.Write("`n")
+    [Console]::Out.Flush()
+}
+
+function Write-StreamEnvelope([string]$Response) {
+    $status = if ($env:FAKE_STATUS) { $env:FAKE_STATUS } else { "SUCCESS" }
+    if ($env:FAKE_RESPONSE_FILE) { $Response = [IO.File]::ReadAllText($env:FAKE_RESPONSE_FILE, [Text.Encoding]::UTF8) }
+
+    Write-Line @{ event = "init"; conversation_id = "fake"; init = @{} }
+    Write-Line @{ event = "step_update"; step_update = @{ conversation_id = "fake"; step_index = 0; state = "DONE"; step_type = "user_input" } }
+
+    if ($Response.Length -gt 0) {
+        $half = [Math]::Ceiling($Response.Length / 2.0)
+        $first = $Response.Substring(0, $half)
+        $rest = $Response.Substring($half)
+        Write-Line @{ event = "step_update"; step_update = @{ conversation_id = "fake"; step_index = 1; state = "ACTIVE"; step_type = "agent_response"; text_delta = $first } }
+        $delay = $env:FAKE_STREAM_DELAY
+        if (-not $delay) { $delay = $env:FAKE_AGY_STREAM_DELAY }
+        if ($delay) { Start-Sleep -Seconds ([double]$delay) }
+        Write-Line @{ event = "step_update"; step_update = @{ conversation_id = "fake"; step_index = 1; state = "DONE"; step_type = "agent_response"; text_delta = $rest } }
+    }
+
+    $toolEvent = ($env:FAKE_TOOL_EVENT -eq "1") -or ($env:FAKE_AGY_TOOL_EVENT -eq "1")
+    if ($toolEvent) {
+        Write-Line @{ event = "step_update"; step_update = @{ conversation_id = "fake"; step_index = 2; state = "ACTIVE"; step_type = "tool"; tool_name = "run_command"; tool_info = @{ parameters = @{ command = "echo hi" } } } }
+        Write-Line @{ event = "step_update"; step_update = @{ conversation_id = "fake"; step_index = 2; state = "DONE"; step_type = "tool"; tool_name = "run_command"; tool_info = @{ parameters = @{ command = "echo hi" }; error = @{ type = "TOOL_ERROR"; message = "context canceled" } } } }
+    }
+
+    $noResult = ($env:FAKE_NO_RESULT -eq "1") -or ($env:FAKE_AGY_NO_RESULT -eq "1")
+    if ($noResult) { return }
+
+    $result = [ordered]@{
+        conversation_id = "fake"
+        status = $status
+        response = $Response
+        duration_seconds = 0
+        num_turns = 1
+        usage = @{}
+    }
+    $denied = Get-DeniedActions
+    if ($null -ne $denied) { $result.denied_actions = $denied }
+    Write-Line @{ event = "result"; result = $result }
 }
 
 if ($env:FAKE_RAW) { Write-Output $env:FAKE_RAW; exit 0 }
@@ -46,10 +99,13 @@ switch ($env:FAKE_MODE) {
     "empty" {
         if ($env:FAKE_RAW_EMPTY -eq "1") { exit 0 }
         if ($useJson) { Write-JsonEnvelope ""; exit 0 }
+        if ($useStream) { Write-StreamEnvelope ""; exit 0 }
         exit 0
     }
     "sleep" { Start-Sleep -Seconds 10; Write-Output "late" }
     default {
-        if ($useJson) { Write-JsonEnvelope "fake response" } else { Write-Output "fake response" }
+        if ($useJson) { Write-JsonEnvelope "fake response" }
+        elseif ($useStream) { Write-StreamEnvelope "fake response" }
+        else { Write-Output "fake response" }
     }
 }

@@ -28,7 +28,8 @@ t_args() {
         grep -qx -- '9s' "$ROOT/argv" && grep -qx -- 'gemini/test' "$ROOT/argv" &&
         grep -qx -- '--sandbox' "$ROOT/argv" && grep -qx -- '--disable-slash-commands' "$ROOT/argv" && grep -qx -- '--new-project' "$ROOT/argv" &&
         grep -qx -- '--add-dir' "$ROOT/argv" &&
-        grep -qx -- '--output-format' "$ROOT/argv" && grep -qx -- 'json' "$ROOT/argv"
+        grep -qx -- '--output-format' "$ROOT/argv" &&
+        { grep -qx -- 'stream-json' "$ROOT/argv" || grep -qx -- 'json' "$ROOT/argv"; }
 }
 t_media() {
     export FAKE_AGY_OUTPUT=ok
@@ -214,6 +215,76 @@ t_bom_input() {
     unset FAKE_AGY_OUTPUT FAKE_AGY_BOM
     [[ "$any_tested" -eq 1 ]]
 }
+pick_stream_tool() {
+    for t in python3 python node; do
+        tool_is_usable "$t" && { printf '%s' "$t"; return 0; }
+    done
+    return 1
+}
+
+t_liveness_stream_delay() {
+    local stream_tool; stream_tool="$(pick_stream_tool)" || return 0
+    export FAKE_AGY_OUTPUT='fake response' FAKE_AGY_STREAM_DELAY=3
+    local live_out="$ROOT/live_out"
+    : >"$live_out"
+    PATH="$ROOT/bin:$PATH" ANTIGRAVITY_WRAPPER_JSON_TOOL="$stream_tool" bash "$WRAPPER" --prompt hi >"$live_out" 2>/dev/null &
+    local pid=$!
+    local first_nonempty=""
+    local start_ns; start_ns="$(date +%s%N)"
+    while kill -0 "$pid" 2>/dev/null; do
+        if [[ -z "$first_nonempty" && -s "$live_out" ]]; then
+            first_nonempty="$(date +%s%N)"
+        fi
+        sleep 0.2
+    done
+    wait "$pid"
+    local exit_ns; exit_ns="$(date +%s%N)"
+    unset FAKE_AGY_STREAM_DELAY FAKE_AGY_OUTPUT
+    [[ -n "$first_nonempty" ]] || return 1
+    local gap_ns=$((exit_ns - first_nonempty))
+    [[ "$gap_ns" -ge 2000000000 ]]
+}
+t_tool_progress_on_stderr() {
+    local stream_tool; stream_tool="$(pick_stream_tool)" || return 0
+    export FAKE_AGY_OUTPUT='fake response' FAKE_AGY_TOOL_EVENT=1
+    set +e; out="$(PATH="$ROOT/bin:$PATH" ANTIGRAVITY_WRAPPER_JSON_TOOL="$stream_tool" bash "$WRAPPER" --prompt hi 2>"$ROOT/tool_err")"; code=$?; set -e
+    unset FAKE_AGY_TOOL_EVENT FAKE_AGY_OUTPUT
+    [[ $code -eq 0 ]] || return 1
+    grep -qF 'ANTIGRAVITY: tool=run_command state=ACTIVE' "$ROOT/tool_err" || return 1
+    grep -qF 'ANTIGRAVITY: tool=run_command state=DONE error=TOOL_ERROR: context canceled' "$ROOT/tool_err" || return 1
+    [[ "$out" != *'tool='* ]]
+}
+t_no_result_event() {
+    local stream_tool; stream_tool="$(pick_stream_tool)" || return 0
+    export FAKE_AGY_OUTPUT='fake response' FAKE_AGY_NO_RESULT=1
+    set +e; out="$(PATH="$ROOT/bin:$PATH" ANTIGRAVITY_WRAPPER_JSON_TOOL="$stream_tool" bash "$WRAPPER" --prompt hi 2>/dev/null)"; code=$?; set -e
+    unset FAKE_AGY_NO_RESULT FAKE_AGY_OUTPUT
+    [[ $code -eq 1 && "$out" == *'stream ended without a result event'* ]]
+}
+t_denied_with_response_after_stream() {
+    local stream_tool; stream_tool="$(pick_stream_tool)" || return 0
+    local no_newline_file="$ROOT/no_newline_response.txt"
+    printf 'no trailing newline here' >"$no_newline_file"
+    export FAKE_AGY_RESPONSE_FILE="$no_newline_file" FAKE_AGY_DENIED='command:Bash'
+    set +e; out="$(PATH="$ROOT/bin:$PATH" ANTIGRAVITY_WRAPPER_JSON_TOOL="$stream_tool" bash "$WRAPPER" --prompt hi 2>/dev/null)"; code=$?; set -e
+    unset FAKE_AGY_RESPONSE_FILE FAKE_AGY_DENIED
+    [[ $code -eq 0 ]] || return 1
+    [[ "$out" == $'no trailing newline here\n[ANTIGRAVITY_DENIED_ACTIONS] command (Bash)' ]]
+}
+t_jq_fallback_buffered() {
+    tool_is_usable jq || return 0
+    export FAKE_AGY_OUTPUT=ok
+    set +e
+    out="$(PATH="$ROOT/bin:$PATH" ANTIGRAVITY_WRAPPER_JSON_TOOL=jq bash "$WRAPPER" --prompt hi 2>"$ROOT/jq_err")"
+    code=$?
+    set -e
+    unset FAKE_AGY_OUTPUT
+    [[ $code -eq 0 && "$out" == *'ok'* ]] || return 1
+    grep -qx -- '--output-format' "$ROOT/argv" || return 1
+    grep -qx -- 'json' "$ROOT/argv" || return 1
+    ! grep -qx -- 'stream-json' "$ROOT/argv" || return 1
+    grep -qF 'falling back to buffered output' "$ROOT/jq_err"
+}
 t_response_file_cleanup() {
     before="$(ls "${TMPDIR:-/tmp}" 2>/dev/null | grep -c '^antigravity_response\.' || true)"
     export FAKE_AGY_OUTPUT='ok'
@@ -246,6 +317,11 @@ check stderr_tail_on_empty t_stderr_tail_on_empty
 check large_response t_large_response
 check crlf_and_trailing_newlines t_crlf_and_trailing_newlines
 check bom_input t_bom_input
+check liveness_stream_delay t_liveness_stream_delay
+check tool_progress_on_stderr t_tool_progress_on_stderr
+check no_result_event t_no_result_event
+check denied_with_response_after_stream t_denied_with_response_after_stream
+check jq_fallback_buffered t_jq_fallback_buffered
 check response_file_cleanup t_response_file_cleanup
 printf 'Passed: %d / %d\n' "$passed" "$total"
 [[ "$passed" -eq "$total" ]]

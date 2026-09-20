@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Antigravity CLI の非対話呼び出し。prompt/context は argv に含めず stdin で渡す。
-# --output-format json is used to detect denied_actions (auto-denied tool permissions in headless mode).
-# JSON parsing needs jq, python3, python, or node in PATH; set ANTIGRAVITY_WRAPPER_JSON_TOOL=none to force the
-# no-parser fallback (keeps the plain-text path, used by tests).
+# --output-format stream-json streams progress live (init/step_update/result events) and needs a
+# line-by-line parser (python3, python, or node) to track state across lines; jq cannot do that, so
+# jq falls back to buffered --output-format json, and with no parser at all we fall back to plain text.
+# Set ANTIGRAVITY_WRAPPER_JSON_TOOL=none to force the no-parser fallback (used by tests).
 set -euo pipefail
 
 ERROR_SENTINEL='[ANTIGRAVITY_WRAPPER_ERROR]'
@@ -27,7 +28,8 @@ json_tool() {
         json_tool_works "$ANTIGRAVITY_WRAPPER_JSON_TOOL" && { printf '%s' "$ANTIGRAVITY_WRAPPER_JSON_TOOL"; return 0; }
         return 1
     fi
-    for tool in jq python3 python node; do
+    # Stream-capable tools first (python/node run the live parser); jq only supports buffered mode.
+    for tool in python3 python node jq; do
         json_tool_works "$tool" && { printf '%s' "$tool"; return 0; }
     done
     return 1
@@ -156,11 +158,13 @@ INPUT_FILE=''
 OUT_FILE=''
 ERR_FILE=''
 RESPONSE_FILE=''
+RESULT_FILE=''
 cleanup() {
     [[ -z "$INPUT_FILE" ]] || rm -f "$INPUT_FILE"
     [[ -z "$OUT_FILE" ]] || rm -f "$OUT_FILE"
     [[ -z "$ERR_FILE" ]] || rm -f "$ERR_FILE"
     [[ -z "$RESPONSE_FILE" ]] || rm -f "$RESPONSE_FILE"
+    [[ -z "$RESULT_FILE" ]] || rm -f "$RESULT_FILE" "${RESULT_FILE}.raw" "${RESULT_FILE}.streamed"
     [[ -z "$MEDIA_DIR" ]] || rm -rf -- "$MEDIA_DIR"
     [[ -z "$OWNED_WORKDIR" ]] || rm -rf -- "$OWNED_WORKDIR"
 }
@@ -241,8 +245,20 @@ else
     printf 'Warning: no JSON parser (jq/python3/python/node) found; denied-action detection disabled.\n' >&2
 fi
 
+# Streaming needs a line-by-line parser that can keep state across lines (python3/python/node).
+# jq cannot do that conveniently, so jq keeps the old buffered --output-format json path.
+STREAM_TOOL=""
+OUTPUT_FORMAT=""
+if [[ "$JSON_TOOL" == "python3" || "$JSON_TOOL" == "python" || "$JSON_TOOL" == "node" ]]; then
+    STREAM_TOOL="$JSON_TOOL"
+    OUTPUT_FORMAT="stream-json"
+elif [[ "$JSON_TOOL" == "jq" ]]; then
+    OUTPUT_FORMAT="json"
+    printf 'Warning: streaming needs python3/python/node; falling back to buffered output.\n' >&2
+fi
+
 ARGS=(--print-timeout "${PRINT_TIMEOUT}s" --disable-slash-commands)
-[[ -z "$JSON_TOOL" ]] || ARGS+=(--output-format json)
+[[ -z "$OUTPUT_FORMAT" ]] || ARGS+=(--output-format "$OUTPUT_FORMAT")
 ARGS+=(--new-project --add-dir "$WORKDIR")
 [[ -z "$MEDIA_DIR" ]] || ARGS+=(--add-dir "$MEDIA_DIR")
 [[ -z "$MODEL" ]] || ARGS+=(--model "$MODEL")
@@ -252,15 +268,224 @@ ARGS+=(--new-project --add-dir "$WORKDIR")
 printf 'ANTIGRAVITY: workdir=%s timeout=%ss sandbox=%s dangerous=%s\n' \
     "$WORKDIR" "$TIMEOUT" "$SANDBOX" "$DANGEROUS" >&2
 
-run_agy() { (cd "$WORKDIR" && "$@" agy "${ARGS[@]}" <"$INPUT_FILE" >"$OUT_FILE" 2>"$ERR_FILE"); }
-AGY_EXIT=0
+TIMEOUT_CMD=()
 if command -v timeout >/dev/null 2>&1; then
-    run_agy timeout "${TIMEOUT}s" || AGY_EXIT=$?
+    TIMEOUT_CMD=(timeout "${TIMEOUT}s")
 elif command -v gtimeout >/dev/null 2>&1; then
-    run_agy gtimeout "${TIMEOUT}s" || AGY_EXIT=$?
+    TIMEOUT_CMD=(gtimeout "${TIMEOUT}s")
 else
     printf 'Warning: parent timeout command unavailable; relying on agy --print-timeout.\n' >&2
-    run_agy || AGY_EXIT=$?
+fi
+
+# Python stream parser: reads agy's stream-json lines from stdin, writes agent_response text_delta
+# bytes to its own stdout immediately (no newline translation), progress lines to stderr, and the
+# final `result` event (if any) as one JSON line to RESULT_FILE (argv[1]). Exit 2 = no recognizable
+# JSON event was seen at all (raw/garbage stream) and the raw bytes are saved to RESULT_FILE.raw;
+# exit 3 = the stream was completely empty.
+STREAM_PARSER_PY='
+import json, sys
+
+def to_str(v):
+    if v is None:
+        return ""
+    return v if isinstance(v, str) else str(v)
+
+try:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", newline="")
+    if hasattr(sys.stdin, "reconfigure"):
+        sys.stdin.reconfigure(encoding="utf-8", newline="")
+except Exception:
+    pass
+
+result_file = sys.argv[1]
+any_event = False
+any_line = False
+any_delta = False
+delta_parts = []
+raw_lines = []
+first_line = True
+
+for line in sys.stdin:
+    line = line.rstrip("\n").rstrip("\r")
+    if first_line:
+        first_line = False
+        if line.startswith("﻿"):
+            line = line[1:]
+    if not line:
+        continue
+    any_line = True
+    raw_lines.append(line)
+    try:
+        obj = json.loads(line)
+    except Exception:
+        continue
+    if not isinstance(obj, dict):
+        continue
+    event = obj.get("event")
+    if not event:
+        continue
+    any_event = True
+    if event == "init":
+        convid = to_str(obj.get("conversation_id"))
+        if convid:
+            sys.stderr.write("ANTIGRAVITY: conversation_id=%s\n" % convid)
+            sys.stderr.flush()
+    elif event == "step_update":
+        su = obj.get("step_update") or {}
+        if not isinstance(su, dict):
+            continue
+        step_type = su.get("step_type")
+        state = su.get("state", "")
+        if step_type == "agent_response":
+            delta = su.get("text_delta")
+            if delta:
+                sys.stdout.buffer.write(delta.encode("utf-8"))
+                sys.stdout.buffer.flush()
+                any_delta = True
+                delta_parts.append(delta)
+        elif step_type == "tool":
+            tool_name = to_str(su.get("tool_name"))
+            msg = "ANTIGRAVITY: tool=%s state=%s" % (tool_name, state)
+            tool_info = su.get("tool_info") or {}
+            if isinstance(tool_info, dict):
+                err = tool_info.get("error")
+                if isinstance(err, dict):
+                    err_type = to_str(err.get("type"))
+                    err_msg = to_str(err.get("message")).replace("\n", " ").replace("\r", " ")
+                    combined = "%s: %s" % (err_type, err_msg)
+                    if len(combined) > 300:
+                        combined = combined[:300]
+                    msg += " error=%s" % combined
+            sys.stderr.write(msg + "\n")
+            sys.stderr.flush()
+    elif event == "result":
+        with open(result_file, "w", encoding="utf-8", newline="") as rf:
+            rf.write(json.dumps(obj.get("result") or {}, ensure_ascii=False))
+            rf.write("\n")
+
+if not any_line:
+    sys.exit(3)
+if not any_event:
+    with open(result_file + ".raw", "w", encoding="utf-8", newline="") as rf:
+        rf.write("\n".join(raw_lines))
+    sys.exit(2)
+if any_delta:
+    with open(result_file + ".streamed", "w", encoding="utf-8", newline="") as rf:
+        rf.write("".join(delta_parts))
+sys.exit(0)
+'
+
+STREAM_PARSER_NODE='
+const readline = require("readline");
+const fs = require("fs");
+
+const resultFile = process.argv[1];
+const rl = readline.createInterface({ input: process.stdin, terminal: false, crlfDelay: Infinity });
+let anyEvent = false;
+let anyLine = false;
+let anyDelta = false;
+const deltaParts = [];
+const rawLines = [];
+let firstLine = true;
+
+function toStr(v) {
+    if (v === null || v === undefined) return "";
+    return typeof v === "string" ? v : String(v);
+}
+
+rl.on("line", (line) => {
+    if (firstLine) {
+        firstLine = false;
+        if (line.charCodeAt(0) === 0xFEFF) line = line.slice(1);
+    }
+    if (!line) return;
+    anyLine = true;
+    rawLines.push(line);
+    let obj;
+    try { obj = JSON.parse(line); } catch { return; }
+    if (!obj || typeof obj !== "object") return;
+    const event = obj.event;
+    if (!event) return;
+    anyEvent = true;
+    if (event === "init") {
+        const convid = toStr(obj.conversation_id);
+        if (convid) process.stderr.write(`ANTIGRAVITY: conversation_id=${convid}\n`);
+    } else if (event === "step_update") {
+        const su = obj.step_update || {};
+        const stepType = su.step_type;
+        const state = su.state || "";
+        if (stepType === "agent_response") {
+            const delta = su.text_delta;
+            if (delta) {
+                process.stdout.write(Buffer.from(delta, "utf-8"));
+                anyDelta = true;
+                deltaParts.push(delta);
+            }
+        } else if (stepType === "tool") {
+            const toolName = toStr(su.tool_name);
+            let msg = `ANTIGRAVITY: tool=${toolName} state=${state}`;
+            const toolInfo = su.tool_info || {};
+            const err = toolInfo.error;
+            if (err && typeof err === "object") {
+                const errType = toStr(err.type);
+                let errMsg = toStr(err.message).replace(/[\r\n]+/g, " ");
+                let combined = `${errType}: ${errMsg}`;
+                if (combined.length > 300) combined = combined.slice(0, 300);
+                msg += ` error=${combined}`;
+            }
+            process.stderr.write(msg + "\n");
+        }
+    } else if (event === "result") {
+        fs.writeFileSync(resultFile, JSON.stringify(obj.result || {}) + "\n", "utf-8");
+    }
+});
+
+rl.on("close", () => {
+    // Set exitCode instead of calling process.exit() so buffered stdout drains before exit.
+    if (!anyLine) { process.exitCode = 3; return; }
+    if (!anyEvent) {
+        fs.writeFileSync(resultFile + ".raw", rawLines.join("\n"), "utf-8");
+        process.exitCode = 2; return;
+    }
+    if (anyDelta) {
+        fs.writeFileSync(resultFile + ".streamed", deltaParts.join(""), "utf-8");
+    }
+    process.exitCode = 0;
+});
+'
+
+RESULT_FILE=""
+AGY_EXIT=0
+PARSER_EXIT=0
+if [[ -n "$STREAM_TOOL" ]]; then
+    # Streaming path: agy's stdout is piped, line by line, into the STREAM_TOOL parser, which
+    # writes agent_response text_delta bytes to its own stdout live, progress lines to stderr, and
+    # the final result event (if any) to RESULT_FILE. PIPESTATUS captures agy's real exit code even
+    # though it runs upstream of the pipe.
+    RESULT_FILE="$(mktemp "${TMPDIR:-/tmp}/antigravity_result.XXXXXX")" || die 1 'Unable to create temporary result file.'
+    rm -f "$RESULT_FILE"
+    set +e
+    # Only the agy side runs in a subshell (for cd); the pipe itself must be in this shell so that
+    # PIPESTATUS[0] is agy's exit code and PIPESTATUS[1] the parser's.
+    if [[ "$STREAM_TOOL" == "node" ]]; then
+        (cd "$WORKDIR" && "${TIMEOUT_CMD[@]}" agy "${ARGS[@]}" <"$INPUT_FILE" 2>"$ERR_FILE") \
+            | node -e "$STREAM_PARSER_NODE" -- "$RESULT_FILE"
+    else
+        (cd "$WORKDIR" && "${TIMEOUT_CMD[@]}" agy "${ARGS[@]}" <"$INPUT_FILE" 2>"$ERR_FILE") \
+            | "$STREAM_TOOL" -c "$STREAM_PARSER_PY" "$RESULT_FILE"
+    fi
+    pipe_status=("${PIPESTATUS[@]}")
+    set -e
+    AGY_EXIT="${pipe_status[0]}"
+    PARSER_EXIT="${pipe_status[1]:-0}"
+else
+    run_agy() { (cd "$WORKDIR" && "$@" agy "${ARGS[@]}" <"$INPUT_FILE" >"$OUT_FILE" 2>"$ERR_FILE"); }
+    if [[ "${#TIMEOUT_CMD[@]}" -gt 0 ]]; then
+        run_agy "${TIMEOUT_CMD[@]}" || AGY_EXIT=$?
+    else
+        run_agy || AGY_EXIT=$?
+    fi
 fi
 
 [[ -s "$ERR_FILE" ]] && cat "$ERR_FILE" >&2
@@ -268,7 +493,11 @@ if [[ "$AGY_EXIT" -eq 124 || "$AGY_EXIT" -eq 137 ]]; then
     die 2 "agy CLI timed out after ${TIMEOUT}s."
 fi
 if [[ "$AGY_EXIT" -ne 0 ]]; then
-    [[ ! -s "$OUT_FILE" ]] || cat "$OUT_FILE"
+    if [[ -n "$STREAM_TOOL" ]]; then
+        : # deltas (if any) were already streamed live; nothing buffered to replay.
+    else
+        [[ ! -s "$OUT_FILE" ]] || cat "$OUT_FILE"
+    fi
     printf '%s agy CLI exited with non-zero status: %s\n' "$ERROR_SENTINEL" "$AGY_EXIT"
     exit "$AGY_EXIT"
 fi
@@ -279,7 +508,36 @@ stderr_tail() {
     tail -n 5 "$ERR_FILE" | cut -c1-400
 }
 
-[[ -s "$OUT_FILE" ]] || { printf '%s agy CLI returned empty output.\n' "$ERROR_SENTINEL"; stderr_tail; printf 'Error: agy CLI returned empty output.\n' >&2; exit 1; }
+if [[ -n "$STREAM_TOOL" ]]; then
+    # PARSER_EXIT non-zero means the stream itself was unparseable garbage (no recognizable
+    # JSON events at all); an empty stream (agy printed nothing) also lands here.
+    if [[ "$PARSER_EXIT" -eq 2 ]]; then
+        RAW="$(cat "$RESULT_FILE.raw" 2>/dev/null | head -c 500)"
+        rm -f "$RESULT_FILE" "$RESULT_FILE.raw"
+        printf '%s agy returned unparseable output.\n%s\n' "$ERROR_SENTINEL" "$RAW"
+        stderr_tail
+        printf 'Error: agy returned unparseable output.\n' >&2
+        exit 1
+    fi
+    if [[ "$PARSER_EXIT" -eq 3 ]]; then
+        rm -f "$RESULT_FILE" "$RESULT_FILE.raw"
+        printf '%s agy returned empty output.\n' "$ERROR_SENTINEL"
+        stderr_tail
+        printf 'Error: agy returned empty output.\n' >&2
+        exit 1
+    fi
+    if [[ ! -s "$RESULT_FILE" ]]; then
+        rm -f "$RESULT_FILE" "$RESULT_FILE.raw"
+        printf '%s agy stream ended without a result event.\n' "$ERROR_SENTINEL"
+        stderr_tail
+        printf 'Error: agy stream ended without a result event.\n' >&2
+        exit 1
+    fi
+    OUT_FILE="$RESULT_FILE"
+    JSON_TOOL="$STREAM_TOOL"
+else
+    [[ -s "$OUT_FILE" ]] || { printf '%s agy CLI returned empty output.\n' "$ERROR_SENTINEL"; stderr_tail; printf 'Error: agy CLI returned empty output.\n' >&2; exit 1; }
+fi
 
 if [[ -z "$JSON_TOOL" ]]; then
     cat "$OUT_FILE"
@@ -426,7 +684,9 @@ if [[ "$PARSE_OK" -ne 1 || -z "$STATUS_LINE" ]]; then
     exit 1
 fi
 
-if [[ -n "$CONVERSATION_ID_LINE" ]]; then
+# In streaming mode conversation_id and tool progress were already printed live by the parser as
+# soon as the events arrived; do not print conversation_id again here.
+if [[ -z "$STREAM_TOOL" && -n "$CONVERSATION_ID_LINE" ]]; then
     printf 'ANTIGRAVITY: conversation_id=%s\n' "$CONVERSATION_ID_LINE" >&2
 fi
 
@@ -444,7 +704,20 @@ fi
 RESPONSE_IS_EMPTY=1
 [[ -z "$(tr -d '[:space:]' <"$RESPONSE_FILE" | head -c 1)" ]] || RESPONSE_IS_EMPTY=0
 
+STREAMED_TEXT_FILE=""
+STREAMED=0
+if [[ -n "$STREAM_TOOL" && -s "${RESULT_FILE}.streamed" ]]; then
+    STREAMED=1
+    STREAMED_TEXT_FILE="${RESULT_FILE}.streamed"
+    if ! cmp -s "$STREAMED_TEXT_FILE" "$RESPONSE_FILE"; then
+        printf 'ANTIGRAVITY: warning=streamed text differs from final response\n' >&2
+    fi
+fi
+
 emit_response() {
+    # If deltas were already streamed live, do not print the response again (defensive fallback
+    # only fires when streaming produced no deltas at all).
+    if [[ "$STREAMED" -eq 1 ]]; then return 0; fi
     cat "$RESPONSE_FILE"
     if [[ -s "$RESPONSE_FILE" ]]; then
         last_byte="$(tail -c 1 "$RESPONSE_FILE" | od -An -tx1 | tr -d ' \n')"
@@ -478,6 +751,12 @@ elif [[ "$RESPONSE_IS_EMPTY" -eq 1 ]]; then
 else
     emit_response
     if [[ -n "$DENIED_TEXT" ]]; then
+        if [[ "$STREAMED" -eq 1 ]]; then
+            # Text was already streamed live; only add a newline before the denied line if the
+            # streamed text did not already end with one.
+            last_byte="$(tail -c 1 "$STREAMED_TEXT_FILE" | od -An -tx1 | tr -d ' \n')"
+            [[ "$last_byte" == "0a" ]] || printf '\n'
+        fi
         printf '[ANTIGRAVITY_DENIED_ACTIONS] %s\n' "$DENIED_TEXT"
         printf '[ANTIGRAVITY_DENIED_ACTIONS] %s\n' "$DENIED_TEXT" >&2
     fi

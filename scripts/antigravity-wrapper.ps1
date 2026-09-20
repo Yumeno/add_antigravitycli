@@ -205,7 +205,7 @@ try { $agy = (Get-Command agy -ErrorAction Stop).Source } catch { Fail 1 "'agy' 
 $resolvedWorkDir = (Resolve-Path -LiteralPath $WorkDir).Path
 $agyArgs = @(
     "--print-timeout", ("{0}s" -f $Timeout),
-    "--disable-slash-commands", "--output-format", "json", "--sandbox", "--new-project", "--add-dir", $resolvedWorkDir
+    "--disable-slash-commands", "--output-format", "stream-json", "--sandbox", "--new-project", "--add-dir", $resolvedWorkDir
 )
 if ($OwnedMediaDir) { $agyArgs += @("--add-dir", $OwnedMediaDir) }
 if ($Model) { $agyArgs += @("--model", $Model); [Console]::Error.WriteLine("MODEL: $Model") }
@@ -228,39 +228,114 @@ $info.RedirectStandardInput = $true
 $info.RedirectStandardOutput = $true
 $info.RedirectStandardError = $true
 
+function Get-StderrTail([string]$Stderr) {
+    if ([string]::IsNullOrWhiteSpace($Stderr)) { return "" }
+    $lines = $Stderr.TrimEnd() -split "`r`n|`n" | Select-Object -Last 5
+    $truncated = $lines | ForEach-Object { if ($_.Length -gt 400) { $_.Substring(0, 400) } else { $_ } }
+    return "`nagy stderr (tail):`n" + ($truncated -join "`n")
+}
+
 try {
     $process = [Diagnostics.Process]::Start($info)
     $writer = New-Object IO.StreamWriter($process.StandardInput.BaseStream, (New-Object Text.UTF8Encoding($false)))
     $writer.Write($inputText); $writer.Close()
-    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
     $stderrTask = $process.StandardError.ReadToEndAsync()
-    if (-not $process.WaitForExit($Timeout * 1000)) {
+
+    Add-Type -AssemblyName System.Web.Extensions
+    $ser = New-Object System.Web.Script.Serialization.JavaScriptSerializer
+    $ser.MaxJsonLength = [int]::MaxValue
+
+    $rawLines = New-Object Text.StringBuilder
+    $deltaText = New-Object Text.StringBuilder
+    $anyDelta = $false
+    $anyValidEvent = $false
+    $resultObj = $null
+    $deadline = [DateTime]::UtcNow.AddSeconds($Timeout)
+    $timedOut = $false
+
+    while ($true) {
+        $remainingMs = [int]([Math]::Max(0, ($deadline - [DateTime]::UtcNow).TotalMilliseconds))
+        $lineTask = $process.StandardOutput.ReadLineAsync()
+        if (-not $lineTask.Wait($remainingMs)) { $timedOut = $true; break }
+        $line = $lineTask.Result
+        if ($null -eq $line) { break }
+        if ($line.Length -eq 0) { continue }
+        [void]$rawLines.AppendLine($line)
+
+        $lineObj = $null
+        try { $lineObj = $ser.DeserializeObject($line) } catch { $lineObj = $null }
+        if (-not ($lineObj -is [Collections.Generic.IDictionary[string,object]])) { continue }
+        $eventName = if ($lineObj.ContainsKey('event')) { [string]$lineObj['event'] } else { "" }
+        if ($eventName) { $anyValidEvent = $true }
+
+        if ($eventName -eq "init") {
+            $convId = if ($lineObj.ContainsKey('conversation_id') -and $null -ne $lineObj['conversation_id']) { [string]$lineObj['conversation_id'] } else { "" }
+            if ($convId) { [Console]::Error.WriteLine("ANTIGRAVITY: conversation_id=$convId") }
+        } elseif ($eventName -eq "step_update" -and $lineObj.ContainsKey('step_update') -and ($lineObj['step_update'] -is [Collections.Generic.IDictionary[string,object]])) {
+            $su = $lineObj['step_update']
+            $stepType = if ($su.ContainsKey('step_type')) { [string]$su['step_type'] } else { "" }
+            $state = if ($su.ContainsKey('state')) { [string]$su['state'] } else { "" }
+            if ($stepType -eq "agent_response") {
+                $delta = if ($su.ContainsKey('text_delta') -and $null -ne $su['text_delta']) { [string]$su['text_delta'] } else { "" }
+                if ($delta.Length -gt 0) {
+                    [Console]::Out.Write($delta)
+                    [Console]::Out.Flush()
+                    [void]$deltaText.Append($delta)
+                    $anyDelta = $true
+                }
+            } elseif ($stepType -eq "tool") {
+                $toolName = if ($su.ContainsKey('tool_name')) { [string]$su['tool_name'] } else { "" }
+                $line2 = "ANTIGRAVITY: tool=$toolName state=$state"
+                if ($su.ContainsKey('tool_info') -and ($su['tool_info'] -is [Collections.Generic.IDictionary[string,object]])) {
+                    $toolInfo = $su['tool_info']
+                    if ($toolInfo.ContainsKey('error') -and ($toolInfo['error'] -is [Collections.Generic.IDictionary[string,object]])) {
+                        $err = $toolInfo['error']
+                        $errType = if ($err.ContainsKey('type')) { [string]$err['type'] } else { "" }
+                        $errMsg = if ($err.ContainsKey('message')) { [string]$err['message'] } else { "" }
+                        $errMsg = ($errMsg -replace '[\r\n]+', ' ')
+                        $combined = "${errType}: ${errMsg}"
+                        if ($combined.Length -gt 300) { $combined = $combined.Substring(0, 300) }
+                        $line2 += " error=$combined"
+                    }
+                }
+                [Console]::Error.WriteLine($line2)
+            }
+            # user_input step events are not printed.
+        } elseif ($eventName -eq "result" -and $lineObj.ContainsKey('result')) {
+            $resultObj = $lineObj['result']
+        }
+    }
+
+    if ($timedOut) {
         & taskkill /T /F /PID $process.Id 2>$null | Out-Null
         $process.WaitForExit()
         Fail 2 "agy timed out after ${Timeout}s"
     }
-    $stdout = $stdoutTask.Result
+    $remainingMs = [int]([Math]::Max(0, ($deadline - [DateTime]::UtcNow).TotalMilliseconds))
+    if (-not $process.WaitForExit($remainingMs)) {
+        & taskkill /T /F /PID $process.Id 2>$null | Out-Null
+        $process.WaitForExit()
+        Fail 2 "agy timed out after ${Timeout}s"
+    }
     $stderr = $stderrTask.Result
     if ($process.ExitCode -ne 0) { Fail $process.ExitCode "agy exited with status $($process.ExitCode). $($stderr.Trim())" }
-    function Get-StderrTail {
-        if ([string]::IsNullOrWhiteSpace($stderr)) { return "" }
-        $lines = $stderr.TrimEnd() -split "`r`n|`n" | Select-Object -Last 5
-        $truncated = $lines | ForEach-Object { if ($_.Length -gt 400) { $_.Substring(0, 400) } else { $_ } }
-        return "`nagy stderr (tail):`n" + ($truncated -join "`n")
+
+    $rawText = $rawLines.ToString()
+    if ([string]::IsNullOrWhiteSpace($rawText)) { Fail 1 "agy returned empty output.$(Get-StderrTail $stderr)" }
+
+    if (-not $anyValidEvent) {
+        $snippet = $rawText.Substring(0, [Math]::Min(500, $rawText.Length))
+        Fail 1 "agy returned unparseable output.`n$snippet$(Get-StderrTail $stderr)"
     }
-    if ([string]::IsNullOrWhiteSpace($stdout)) { Fail 1 "agy returned empty output.$(Get-StderrTail)" }
-    $obj = $null
-    $parseOk = $true
-    try {
-        Add-Type -AssemblyName System.Web.Extensions
-        $ser = New-Object System.Web.Script.Serialization.JavaScriptSerializer
-        $ser.MaxJsonLength = [int]::MaxValue
-        $obj = $ser.DeserializeObject($stdout)
-    } catch { $parseOk = $false }
-    if (-not $parseOk -or -not ($obj -is [Collections.Generic.IDictionary[string,object]]) -or -not $obj.ContainsKey('status')) {
-        $snippet = $stdout.Substring(0, [Math]::Min(500, $stdout.Length))
-        Fail 1 "agy returned unparseable output.`n$snippet$(Get-StderrTail)"
+    if ($null -eq $resultObj) {
+        Fail 1 "agy stream ended without a result event.$(Get-StderrTail $stderr)"
     }
+    if (-not ($resultObj -is [Collections.Generic.IDictionary[string,object]]) -or -not $resultObj.ContainsKey('status')) {
+        $snippet = $rawText.Substring(0, [Math]::Min(500, $rawText.Length))
+        Fail 1 "agy returned unparseable output.`n$snippet$(Get-StderrTail $stderr)"
+    }
+
+    $obj = $resultObj
     $status = [string]$obj['status']
     $response = if ($obj.ContainsKey('response') -and $null -ne $obj['response']) { [string]$obj['response'] } else { "" }
     $rawDenied = if ($obj.ContainsKey('denied_actions')) { $obj['denied_actions'] } else { $null }
@@ -272,12 +347,12 @@ try {
     } elseif ($rawDenied -is [Collections.IEnumerable] -and -not ($rawDenied -is [string])) {
         $deniedEntries = @($rawDenied)
     } else {
-        Fail 1 "agy returned JSON with unexpected denied_actions type.$(Get-StderrTail)"
+        Fail 1 "agy returned JSON with unexpected denied_actions type.$(Get-StderrTail $stderr)"
     }
     $deniedList = New-Object Collections.Generic.List[string]
     foreach ($d in $deniedEntries) {
         if (-not ($d -is [Collections.Generic.IDictionary[string,object]])) {
-            Fail 1 "agy returned JSON with unexpected denied_actions type.$(Get-StderrTail)"
+            Fail 1 "agy returned JSON with unexpected denied_actions type.$(Get-StderrTail $stderr)"
         }
         $action = if ($d.ContainsKey('action') -and $null -ne $d['action']) { [string]$d['action'] } else { "" }
         $displayName = if ($d.ContainsKey('display_name') -and $null -ne $d['display_name']) { [string]$d['display_name'] } else { "" }
@@ -286,10 +361,11 @@ try {
     }
     $deniedText = $deniedList -join ", "
     if ($deniedList.Count) { [Console]::Error.WriteLine("ANTIGRAVITY: denied_actions=$deniedText") }
-    if ($obj.ContainsKey('conversation_id') -and $null -ne $obj['conversation_id']) {
-        $conversationId = [string]$obj['conversation_id']
-        if ($conversationId) { [Console]::Error.WriteLine("ANTIGRAVITY: conversation_id=$conversationId") }
+
+    if ($anyDelta -and $deltaText.ToString() -ne $response) {
+        [Console]::Error.WriteLine("ANTIGRAVITY: warning=streamed text differs from final response")
     }
+
     if ($status -eq "TIMEOUT") {
         $extra = ""
         if ($deniedList.Count) { $extra += "`n[ANTIGRAVITY_DENIED_ACTIONS] $deniedText" }
@@ -301,14 +377,16 @@ try {
         if (-not [string]::IsNullOrWhiteSpace($response)) { $extra += "`n" + $response.TrimEnd() }
         Fail 1 "agy reported status $status.$extra"
     } elseif ([string]::IsNullOrWhiteSpace($response) -and $deniedList.Count) {
-        Fail 1 "agy produced no response because tool permissions were denied in headless mode.`n[ANTIGRAVITY_DENIED_ACTIONS] $deniedText$(Get-StderrTail)"
+        Fail 1 "agy produced no response because tool permissions were denied in headless mode.`n[ANTIGRAVITY_DENIED_ACTIONS] $deniedText$(Get-StderrTail $stderr)"
     } elseif ([string]::IsNullOrWhiteSpace($response)) {
-        Fail 1 "agy returned empty output.$(Get-StderrTail)"
+        Fail 1 "agy returned empty output.$(Get-StderrTail $stderr)"
     } else {
-        # Write the response bytes as-is (same contract as antigravity-wrapper.sh: trailing newlines and CRLF preserved).
-        [Console]::Out.Write($response)
+        # The response text was already streamed live via text_delta; only print it again if no
+        # deltas were emitted (defensive fallback). Trailing newlines and CRLF are preserved either way.
+        if (-not $anyDelta) { [Console]::Out.Write($response) }
         if ($deniedList.Count) {
-            if (-not $response.EndsWith("`n")) { [Console]::Out.Write("`n") }
+            $endsWithNewline = if ($anyDelta) { $deltaText.ToString().EndsWith("`n") } else { $response.EndsWith("`n") }
+            if (-not $endsWithNewline) { [Console]::Out.Write("`n") }
             [Console]::Out.Write("[ANTIGRAVITY_DENIED_ACTIONS] $deniedText`n")
             [Console]::Error.WriteLine("[ANTIGRAVITY_DENIED_ACTIONS] $deniedText")
         }
